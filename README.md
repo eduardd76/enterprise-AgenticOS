@@ -155,6 +155,13 @@ Set `AOS_REQUIRE_SANDBOX=1` to refuse to run agents unsandboxed.
 This is an actual run on real FRR routers with Slack approvals (`agenticos watch`), recorded
 on a MacBook. Times are seconds from the moment the network broke.
 
+> **Where the LLM was:** this run used the built-in *scripted reasoner* for diagnosis (no
+> `--model` flag). Add `--model qwen2.5:7b-instruct` and the same flow uses a local LLM
+> through Ollama. In a separate run, Qwen identified the same root cause in about 5 seconds.
+> The LLM only ever *proposes* hypotheses; detection, evidence, simulation, permission,
+> approval, execution and verification are deterministic, as described in
+> [where the LLM sits](#where-the-llm-sits).
+
 ### The setup
 
 - **Two real routers** (FRR in Docker), `lab-r1` and `lab-r2`, connected with BGP, the
@@ -171,9 +178,10 @@ on a MacBook. Times are seconds from the moment the network broke.
 2. **The watcher noticed (about 4 s).** Both routers reported a problem (`Active`,
    `Connect`), but it is one broken link, so the watcher opened **one** incident, INC-0001.
    It assigned it to `lab-r1`, because that router's own interface was the one switched off.
-3. **A team of AI agents started.** A *coordinator* agent started a *diagnosis* agent with
-   **read-only** permission on `lab-r1` only. It read the BGP and interface state and
-   concluded "the interface is administratively down", in under half a second.
+3. **A team of agents started.** A *coordinator* agent started a *diagnosis* agent with
+   **read-only** permission on `lab-r1` only. It read the BGP and interface state and, using
+   the reasoner (scripted in this run; a local LLM with `--model`), concluded "the interface
+   is administratively down", in under half a second.
 4. **A second agent prepared the fix but could not apply it.** A *change* agent worked out
    the fix (`interface eth0 ; no shutdown`) and had the kernel simulate it on a twin. The
    kernel predicted the session comes back with nothing else breaking. A production change
@@ -219,8 +227,35 @@ on a MacBook. Times are seconds from the moment the network broke.
 | Audit | Notes written afterwards, if at all | Complete, automatic, tamper-evident |
 
 The whole incident took **73 seconds**, and **66 of those were the human deciding**; the
-machine work took about 6 seconds. The AI did the work, the human kept the authority, and
-the kernel enforced the boundary between the two.
+machine work took about 6 seconds. The agents did the work, the human kept the authority,
+and the kernel enforced the boundary between the two.
+
+### Where the LLM sits
+
+The LLM has exactly one job: propose a cause and a fix from the evidence. Everything around
+it is deterministic, because each of those steps needs to be exact, repeatable or
+accountable:
+
+| Step | Who does it | Why |
+|---|---|---|
+| Detect the outage | Watcher (plain code) | Cheap, instant, always on |
+| Collect evidence | Kernel + device driver | Facts come from the device, not a model |
+| **Propose a cause and fix** | **LLM** (or scripted fallback) | **The only step that needs judgment** |
+| Check the proposal against evidence | Diagnosis agent code | Models can be confidently wrong |
+| Simulate the fix | Kernel twin | The prediction must not be the model's opinion |
+| Allow or refuse | Kernel policy | A model never decides its own permissions |
+| Approve | Human | Accountability |
+| Apply, verify, audit | Kernel + verifier agent | Exact, once, recorded |
+
+The model's output is treated as untrusted input:
+- it is schema-validated, and malformed output falls back to the scripted reasoner;
+- its "just apply the fix" suggestions are refused, because the diagnosis agent has no
+  write permission;
+- fixes become device commands only through an allowlist.
+
+A single shut-down interface is simple enough for rules. LLMs earn their place on messier
+incidents: many alarms at once, unusual symptom combinations, log interpretation, and
+turning a vague human report into concrete checks. Those are roadmap scenarios.
 
 Reproduce it: [labs/frr-bgp](labs/frr-bgp/README.md).
 
