@@ -1,0 +1,17 @@
+# runtime state
+var/
+*.db
+*.db-journal
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+# private, not for publication
+vExpertAI_*.md
+*.pdf
+.remember/
+.DS_Store

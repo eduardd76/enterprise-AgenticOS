@@ -1,0 +1,7 @@
+Enterprise AgenticOS
+Copyright 2026 The Enterprise AgenticOS Authors
+
+This product implements concepts from "The Agent Operating System (AOS): A Reference
+Operating Architecture for Distributed Agentic Systems" (A. Sharma, D. Shah; AOS-0001,
+arXiv:2608.03214). It is an independent implementation and is not affiliated with or
+endorsed by the AOS specification authors or the aos-core project.
