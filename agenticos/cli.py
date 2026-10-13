@@ -49,10 +49,13 @@ def _printer(t0: float):
     return on_event
 
 
-async def demo(db: str, interactive: bool) -> int:
+async def demo(db: str, interactive: bool, policy: str | None = None) -> int:
     Path(db).unlink(missing_ok=True)
     k = Kernel(db, slots=3, log_dir=Path(db).parent / "logs")
     setup_principals(k)
+    if policy:
+        for tenant, version in k.load_policy_file(policy).items():
+            print(f"confidence policy {version} applied to {tenant}")
     t0 = time.monotonic()
     printer = _printer(t0)
     crashed: set[str] = set()
@@ -223,9 +226,10 @@ def main() -> None:
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--interactive", action="store_true")
     ap.add_argument("--lineage")
+    ap.add_argument("--policy", help="JSON policy file (see examples/policy.json)")
     a = ap.parse_args()
     if a.command == "demo":
-        raise SystemExit(asyncio.run(demo(a.db, a.interactive)))
+        raise SystemExit(asyncio.run(demo(a.db, a.interactive, a.policy)))
     if a.command == "lifecycle":
         raise SystemExit(asyncio.run(lifecycle(a.db)))
     if a.command == "ps":

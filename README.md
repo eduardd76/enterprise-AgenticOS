@@ -27,6 +27,7 @@ production use:
 | What if an agent crashes mid-change? | It restarts from its checkpoint. Non-idempotent changes never run twice; an unknown outcome escalates to a human. |
 | Can we prove what happened? | Yes. A hash-chained audit log, and per-delegation reconstruction of every action. |
 | Does the LLM decide its own confidence? | No. The kernel derives impact from the capability manifest and maps evidence to an action. |
+| Can we set our own risk appetite? | Yes. Confidence thresholds are operator policy, per tenant ([examples/policy.json](examples/policy.json)), versioned, and recorded in every decision. Agents cannot change them. |
 
 ## Quick start
 
@@ -35,6 +36,7 @@ git clone https://github.com/eduardd76/enterprise-AgenticOS && cd enterprise-Age
 python3 -m pip install -e '.[dev]'          # Python >= 3.12, zero runtime dependencies
 python3 -m agenticos demo                   # AI NOC: BGP down -> diagnose -> approve -> fix -> verify
 python3 -m agenticos demo --interactive     # you are the approving NOC lead
+python3 -m agenticos demo --policy examples/policy.json   # per-tenant risk appetite
 python3 -m agenticos lifecycle              # start / suspend / resume / cancel
 python3 -m agenticos ps                     # process table of the last run
 python3 -m agenticos audit --lineage del-0001   # verify audit chain + actions under a delegation

@@ -373,7 +373,8 @@ def register(kernel: "Kernel") -> None:
             comps = {str(n): float(v) for n, v in dict(args["components"]).items()}
             if any(v != v for v in comps.values()):           # NaN
                 raise ValueError("NaN confidence component")
-            body = conf.evaluate(comps, impact, reversible)
+            body = conf.evaluate(comps, impact, reversible,
+                                 k.confidence_policy(ctx.agent["tenant"]))
         except (ValueError, TypeError) as e:
             raise SyscallError("INVALID_REQUEST", str(e)) from e
         refs = list(args.get("evidence_refs", []))

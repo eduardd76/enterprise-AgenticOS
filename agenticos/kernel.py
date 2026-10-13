@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import services
+from .confidence import DEFAULT_POLICY, ConfidencePolicy
 from .delegation import DelegationManager, Grant
 from .drivers import models as model_drivers
 from .drivers import netsim as net_drivers
@@ -103,6 +104,7 @@ class Kernel:
         self.state_dir = None if str(db_path) == ":memory:" else Path(db_path).resolve().parent
         self.isolation = detect_isolation()
         self._jail = tempfile.mkdtemp(prefix="aos-agent-cwd-")
+        self._confidence_policies: dict[str, ConfidencePolicy] = {}   # tenant -> policy
         self.autostart = True        # False: create A-PCBs without processes (in-process tests)
         self.on_event: Callable[[str, dict], None] | None = None
 
@@ -133,6 +135,36 @@ class Kernel:
                           role=agent_type, intent_id=intent_id, delegation_id=did,
                           priority=priority, deadline=body["deadline"], params=params, start=start)
         return intent_id, agent_id
+
+    # -- operator policy (never reachable from an agent syscall) ---------------
+    def set_confidence_policy(self, tenant: str, policy: ConfidencePolicy | dict,
+                              set_by: str = "operator") -> str:
+        """Set a tenant's risk appetite. Returns the policy version recorded in every decision."""
+        if isinstance(policy, dict):
+            policy = ConfidencePolicy(**policy)     # validates ranges and ordering
+        self._confidence_policies[tenant] = policy
+        self.store.audit("policy.confidence.set", tenant=tenant, set_by=set_by,
+                         version=policy.version, thresholds=policy.__dict__)
+        return policy.version
+
+    def confidence_policy(self, tenant: str) -> ConfidencePolicy:
+        return self._confidence_policies.get(
+            tenant, getattr(self, "_default_from_file", DEFAULT_POLICY))
+
+    def load_policy_file(self, path: str | Path, set_by: str = "policy-file") -> dict[str, str]:
+        """JSON: {"confidence": {"default": {...}, "tenants": {"customer-a": {...}}}}.
+        'default' fields apply to every tenant; tenant entries override field by field."""
+        cfg = json.loads(Path(path).read_text()).get("confidence", {})
+        base = cfg.get("default", {})
+        applied = {}
+        for tenant, overrides in cfg.get("tenants", {}).items():
+            applied[tenant] = self.set_confidence_policy(tenant, {**base, **overrides}, set_by)
+        if base:
+            global_policy = ConfidencePolicy(**base)
+            for tenant in {p["tenant"] for p in self.principals.values()} - set(applied):
+                applied[tenant] = self.set_confidence_policy(tenant, global_policy, set_by)
+            self._default_from_file = global_policy
+        return applied
 
     def check_intent(self, intent_id: str) -> dict:
         row = self.store.one("SELECT * FROM intents WHERE intent_id=?", (intent_id,))

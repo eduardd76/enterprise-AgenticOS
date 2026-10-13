@@ -1,0 +1,21 @@
+{
+  "confidence": {
+    "default": {
+      "high_proceed": 0.90,
+      "high_floor": 0.80,
+      "high_warn": 0.80,
+      "allow_warning": true,
+      "hard_floor": 0.50,
+      "low_proceed": 0.80,
+      "low_warn": 0.60
+    },
+    "tenants": {
+      "customer-a": {},
+      "regulated-bank": {
+        "high_proceed": 0.95,
+        "high_floor": 0.90,
+        "allow_warning": false
+      }
+    }
+  }
+}

@@ -92,6 +92,14 @@ The kernel pipe is the only way out.
 | Retry never silently repeats a non-idempotent change | `gateway` idempotency table |
 | LLM output may propose but not modify enforcement rules | policy is code/data loaded at boot; no capability writes `/aos/policies` |
 
+## 5b. Risk appetite is operator policy
+
+`ConfidencePolicy` (agenticos/confidence.py) holds the thresholds that turn a confidence
+vector into an action. The operator sets them per tenant, via `Kernel.set_confidence_policy`
+or a JSON file (`--policy`); no syscall exists to change them. Each policy has a
+content-hash version, and every confidence record and `policy.confidence.set` audit event
+carries it, so any decision can be replayed against the exact rules that produced it.
+
 ## 6. Explicit non-goals for v0.1 (declared per INV-010)
 
 Federation, cross-region scheduling, kernel-level assurance (seccomp/cgroups), containers/microVMs,

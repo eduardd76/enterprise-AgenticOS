@@ -424,3 +424,61 @@ def test_edf_breaks_ties_within_priority(run):
         s.release("early-deadline")
         await asyncio.gather(late, early)
     run(t())
+
+
+# --- Operator-configurable risk appetite ---------------------------------------------------
+def test_confidence_policy_is_per_tenant_versioned_and_validated(run, tmp_path):
+    from agenticos.confidence import COMPONENTS, ConfidencePolicy
+
+    async def t():
+        k = make_kernel()
+        a, b = agent(k), agent(k, principal="mallory", targets=["router-b-01"])
+        comps = {n: .92 for n in COMPONENTS}
+        comps["model"] = .85                       # aggregate ~0.91, weakest 0.85
+
+        async def decide(aid):
+            ev = await call(k, aid, "network.bgp.inspect",
+                            "router-edge-01" if aid == a else "router-b-01",
+                            {"neighbor": "192.0.2.1" if aid == a else "203.0.113.1"})
+            r = await call(k, aid, "confidence.evaluate", args={
+                "components": comps, "for_op": "network.config.apply",
+                "evidence_refs": [ev["evidence_ref"]]})
+            return r["result"]
+
+        default = await decide(a)
+        assert default["decision"] == "PROCEED"
+        assert default["policy_version"] == ConfidencePolicy().version
+        v = k.set_confidence_policy("customer-b", {"high_proceed": .95, "high_floor": .90,
+                                                    "allow_warning": False})
+        strict = await decide(b)
+        assert strict["decision"] == "ESCALATE" and strict["policy_version"] == v
+        assert (await decide(a))["decision"] == "PROCEED"        # tenant A unaffected
+        ev = json.loads(k.store.one("SELECT data FROM audit WHERE event='policy.confidence.set'")
+                        ["data"])
+        assert ev["tenant"] == "customer-b" and ev["version"] == v
+
+        for bad in ({"high_proceed": 1.5}, {"hard_floor": .9, "high_floor": .8},
+                    {"allow_warning": "yes"}, {"high_proceed": True}, {"no_such": .5}):
+            with pytest.raises((ValueError, TypeError)):
+                k.set_confidence_policy("customer-a", bad)
+
+        f = tmp_path / "policy.json"
+        f.write_text(json.dumps({"confidence": {
+            "default": {"high_proceed": .92},
+            "tenants": {"customer-b": {"high_floor": .9}}}}))
+        applied = k.load_policy_file(f)
+        assert k.confidence_policy("customer-b").high_proceed == .92      # default inherited
+        assert k.confidence_policy("customer-b").high_floor == .9         # tenant override
+        assert set(applied) == {"customer-a", "customer-b"}
+    run(t())
+
+
+def test_agents_cannot_reach_policy_configuration(run):
+    async def t():
+        k = make_kernel()
+        a = agent(k)
+        for op in ("policy.set", "confidence.policy.set", "kernel.set_confidence_policy"):
+            assert await code_of(k, a, op, args={"high_proceed": 0.0}) == "UNKNOWN_CAPABILITY"
+        assert await code_of(k, a, "memory.write", "/aos/policies/confidence",
+                             {"data": {"high_proceed": 0.0}}) in ("POLICY_DENIED", "UNAUTHORIZED")
+    run(t())
