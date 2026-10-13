@@ -1,0 +1,6 @@
+{
+  "_comment": "Slack user id -> AgenticOS principal. Only principals with an approver role (e.g. noc-lead) can approve; everyone else is refused. Find a user id in Slack: profile -> ... -> Copy member ID.",
+  "slack": {
+    "U0000000BOB": "bob"
+  }
+}

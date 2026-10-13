@@ -123,8 +123,9 @@ This runs a real outage on real FRR routers in Docker, diagnosed by a local LLM,
 through the kernel with approval, exactly-once execution and verification.
 
 **Always-on mode:** `python3 -m agenticos watch` monitors the routers and opens an incident by
-itself when a BGP link breaks. Agents start, ask a human to approve
-(`agenticos approve apr-0001 --as bob` from another terminal), fix, verify and exit. See
+itself when a BGP link breaks. Agents start and ask a human to approve, either in **Slack**
+(react ✅/❌; outbound-only, no public URL) or with `agenticos approve apr-0001 --as bob`.
+Then they fix, verify and exit. See
 [labs/frr-bgp](labs/frr-bgp/README.md).
 
 Sandboxing is automatic on macOS (`sandbox-exec`) and on Linux with `bubblewrap` installed.
@@ -190,7 +191,8 @@ These are the enterprise-adoption priorities; see `CONFORMANCE.md` for detail.
 1. **Run on your stack:** PostgreSQL store, container image + Helm, seccomp/cgroup limits.
 2. **Integrate, don't replace:** OPA policy adapter, OpenTelemetry export, Vault/SPIFFE
    identity, SSO approvers.
-3. **Approvals where people work:** Slack, Teams, ServiceNow.
+3. **Approvals where people work:** Slack ✅ (reaction-based, outbound-only); Teams and
+   ServiceNow next.
 4. **Compliance evidence:** keyed audit chain; mappings to NIST AI RMF, ISO/IEC 42001 and the
    EU AI Act (Art. 12, Art. 14).
 5. **Proof:** an open benchmark against a plain agent-framework baseline, using the built-in

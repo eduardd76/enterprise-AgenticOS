@@ -19,6 +19,13 @@ single-use human approval, bound to the exact change, plus a re-check of the dev
 Set `AOS_REQUIRE_SANDBOX=1` in any real deployment so the kernel refuses to run agents
 without a sandbox.
 
+## Approval channels
+
+The Slack channel trusts Slack's identity: whoever Slack says reacted, as authenticated by
+your workspace's SSO. Map only approver accounts in the approvers file, and protect the
+channel and the bot token like any production credential. The token is held by the kernel
+process only.
+
 ## Known limitations (summary)
 
 - The audit chain is hash-linked but **not keyed**. Anyone with write access to the state

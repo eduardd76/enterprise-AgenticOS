@@ -292,6 +292,10 @@ def main() -> None:
     ap.add_argument("--interval", type=float, default=3.0, help="watch poll interval (s)")
     ap.add_argument("--once", action="store_true", help="watch: exit after first incident")
     ap.add_argument("--approval-timeout", type=int, default=600)
+    ap.add_argument("--slack-channel", help="watch: post approvals to this Slack channel id "
+                                            "(token in SLACK_BOT_TOKEN)")
+    ap.add_argument("--approvers", help="JSON mapping Slack user ids to principals "
+                                        "(see examples/approvers.json)")
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--interactive", action="store_true")
     ap.add_argument("--lineage")
@@ -309,7 +313,10 @@ def main() -> None:
         db = a.db if a.db != DEFAULT_DB else "var/watch.db"
         if a.command == "watch":
             raise SystemExit(asyncio.run(w.watch(db, a.model, a.interval, a.once,
-                                                 a.approval_timeout)))
+                                                 a.approval_timeout,
+                                                 slack_channel=a.slack_channel,
+                                                 approvers_file=a.approvers,
+                                                 slack_api=os.environ.get("AOS_SLACK_API"))))
         if a.command == "approvals":
             raise SystemExit(w.pending(db))
         if not a.approval_id:

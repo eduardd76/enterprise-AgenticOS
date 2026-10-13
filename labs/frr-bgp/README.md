@@ -51,6 +51,40 @@ breaks:
 Flapping links are debounced. If a link is still down after its incident closes, the
 watcher reports that a human is needed and doesn't retry in a loop.
 
+## Approvals in Slack
+
+Approval requests can go to a Slack channel, where the on-call engineer reacts ✅ to approve
+or ❌ to deny.
+
+The connection is **outbound only**: AgenticOS polls Slack for reactions, so you need no
+public URL and no inbound firewall rule.
+
+**Setup (about 5 minutes):**
+1. At https://api.slack.com/apps, choose **Create New App**, then **From scratch**.
+2. Under **OAuth & Permissions**, add the bot scopes `chat:write` and `reactions:read`, then
+   **Install to Workspace** and copy the **Bot User OAuth Token** (`xoxb-…`).
+3. In your NOC channel, run `/invite @your-app`. Copy the channel ID: right-click the
+   channel, then **View channel details**; the ID is at the bottom.
+4. For each approver: open their profile, choose **⋯**, then **Copy member ID**. Map these
+   IDs to principals in a file like `examples/approvers.json`.
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+python3 -m agenticos watch --slack-channel C0123456789 --approvers examples/approvers.json
+```
+
+**Rules the kernel enforces:**
+- Only mapped Slack users whose principal has an approver role count. Anyone else gets a
+  "refused" reply in the thread.
+- The requester can never approve their own change.
+- If someone reacts both ✅ and ❌, the ❌ wins.
+- Every decision is recorded in the audit log with the Slack user ID.
+- The token stays in the kernel process; sandboxed agents never see it.
+- If Slack is unreachable, `agenticos approve` from the CLI still works.
+
+Teams: a Microsoft Teams channel using the same pattern (read reactions or adaptive-card
+responses through Microsoft Graph) is planned. The kernel-side rules are identical.
+
 ## What happens (one-shot demo)
 
 1. A **real fault**: `interface eth0 / shutdown` on lab-r1. BGP drops to Idle/Active.

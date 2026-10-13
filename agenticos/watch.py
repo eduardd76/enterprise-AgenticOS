@@ -57,7 +57,8 @@ def discover_links(net, tenant: str) -> list[Link]:
 
 async def watch(db: str, model: str | None = None, interval: float = 3.0, once: bool = False,
                 approval_timeout_s: int = 600, debounce: int = 2, cooldown_s: float = 120.0,
-                tenant: str = "customer-a") -> int:
+                tenant: str = "customer-a", slack_channel: str | None = None,
+                approvers_file: str | None = None, slack_api: str | None = None) -> int:
     from .cli import LAB_INVENTORY, TENANT_A, _c, _ollama_ready, _printer, setup_principals
     from .drivers.frr import FrrLab
 
@@ -77,6 +78,20 @@ async def watch(db: str, model: str | None = None, interval: float = 3.0, once: 
         os.environ.pop("AOS_MODEL_URL", None)
         reasoning = "scripted reasoner"
 
+    slack = None
+    if slack_channel:
+        from .channels import SlackApprovalChannel, load_approvers
+        if not approvers_file:
+            print("--slack-channel needs --approvers (maps Slack user ids to principals)")
+            return 2
+        try:
+            slack = SlackApprovalChannel(os.environ.get("SLACK_BOT_TOKEN", ""), slack_channel,
+                                         load_approvers(approvers_file),
+                                         **({"api_base": slack_api} if slack_api else {}))
+        except (ValueError, OSError) as e:
+            print(f"Slack not configured: {e}")
+            return 2
+
     Path(db).unlink(missing_ok=True)
     k = Kernel(db, slots=3, log_dir=Path(db).parent / "logs", netsim=net)
     setup_principals(k)
@@ -92,6 +107,9 @@ async def watch(db: str, model: str | None = None, interval: float = 3.0, once: 
               f"   rollback: {pkg['rollback']}")
         print(f"  │ twin      : {pkg['predicted']}  (computed by the kernel)")
         print(f"  │ confidence: {pkg['confidence']['aggregate']} -> {pkg['confidence']['decision']}")
+        if slack:
+            print(f"  │ slack     : posted to {slack.channel} — react ✅ approve / ❌ deny")
+            asyncio.get_running_loop().create_task(_post_safe(slack, k, aid, pkg))
         print(f"  │ approve   : python3 -m agenticos approve {aid} --as bob --db {db}")
         print(f"  └ deny      : python3 -m agenticos approve {aid} --as bob --deny --db {db}"
               f"   (expires in {approval_timeout_s}s)\n")
@@ -100,7 +118,10 @@ async def watch(db: str, model: str | None = None, interval: float = 3.0, once: 
     print(_c("1", "\n== AgenticOS watch =="))
     print(f"  watching {len(links)} BGP link(s) every {interval:g}s: "
           f"{', '.join(link.key for link in links)}")
-    print(f"  diagnosis: {reasoning} · approvals: human (role noc-lead) · Ctrl-C to stop\n")
+    where = f"Slack {slack_channel} or CLI" if slack else "CLI"
+    print(f"  diagnosis: {reasoning} · approvals: human (role noc-lead) via {where}"
+          f" · Ctrl-C to stop\n")
+    slack_task = asyncio.create_task(slack.run(k)) if slack else None
 
     active: dict[str, tuple[str, str]] = {}          # link key -> (incident, coordinator)
     down_count: dict[str, int] = {}
@@ -154,7 +175,20 @@ async def watch(db: str, model: str | None = None, interval: float = 3.0, once: 
         print("\n  watch stopped")
         return 0
     finally:
+        if slack_task:
+            slack_task.cancel()
         await k.shutdown()
+
+
+async def _post_safe(slack, k, aid: str, pkg: dict) -> None:
+    """HTTP in a worker thread; audit writes back on the kernel thread (SQLite affinity)."""
+    try:
+        await asyncio.to_thread(slack.post, aid, pkg)
+        k.store.audit("approval.posted", approval_id=aid, channel="slack", to=slack.channel)
+    except Exception as e:                       # CLI approval still works if Slack is down
+        k.store.audit("approval.channel_error", approval_id=aid, channel="slack",
+                      error=str(e)[:200])
+        print(f"  ! Slack post failed for {aid} ({e}); approve via CLI instead")
 
 
 def approve(db: str, approval_id: str, principal: str, deny: bool, note: str) -> int:
