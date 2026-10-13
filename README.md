@@ -150,6 +150,80 @@ Set `AOS_REQUIRE_SANDBOX=1` to refuse to run agents unsandboxed.
 8. A tenant-B agent probes tenant A's report and router: both are denied. The audit chain
    verifies.
 
+## A real run, step by step
+
+This is an actual run on real FRR routers with Slack approvals (`agenticos watch`), recorded
+on a MacBook. Times are seconds from the moment the network broke.
+
+### The setup
+
+- **Two real routers** (FRR in Docker), `lab-r1` and `lab-r2`, connected with BGP, the
+  protocol internet providers use to exchange routes.
+- **The AgenticOS watcher**: a small, deterministic program (not an AI) that checks the BGP
+  session every 3 seconds.
+- **Slack**, where the on-call engineer, *bob* (role `noc-lead`), approves changes.
+
+### What happened
+
+1. **The network broke (0 s).** `lab-r1`'s interface was shut down, which is like
+   unplugging the cable. The BGP session dropped and the routers stopped exchanging routes:
+   the classic 3am outage.
+2. **The watcher noticed (about 4 s).** Both routers reported a problem (`Active`,
+   `Connect`), but it is one broken link, so the watcher opened **one** incident, INC-0001.
+   It assigned it to `lab-r1`, because that router's own interface was the one switched off.
+3. **A team of AI agents started.** A *coordinator* agent started a *diagnosis* agent with
+   **read-only** permission on `lab-r1` only. It read the BGP and interface state and
+   concluded "the interface is administratively down", in under half a second.
+4. **A second agent prepared the fix but could not apply it.** A *change* agent worked out
+   the fix (`interface eth0 ; no shutdown`) and had the kernel simulate it on a twin. The
+   kernel predicted the session comes back with nothing else breaking. A production change
+   needs a human, so the agent requested approval and **went to sleep**, using no compute
+   while waiting.
+5. **The request reached Slack (4.8 s).** The kernel posted the review package: what is
+   wrong, the exact commands, how to undo them, the simulation result, and the confidence
+   (0.95, PROCEED). The agent's explanation is labelled *unverified*; the simulation is the
+   kernel's own.
+6. **The engineer approved (71 s).** Bob reacted ✅. The kernel checked:
+   - Is this Slack user mapped to a real approver? Yes: bob.
+   - Does bob have the approver role? Yes: `noc-lead`.
+   - Is bob the person who requested the change? No, so separation of duties holds.
+   - Has the router changed since the request? No, so the plan is still valid.
+7. **The fix was applied, exactly once (71.3 s).** The change agent woke up and the kernel
+   ran `no shutdown` on `lab-r1` a single time.
+8. **Someone else checked the work (73 s).** A separate *verifier* agent checked the router
+   until the session was `Established` **and** routes were flowing again. The agent that
+   makes a change never gets to declare it a success.
+9. **Everything shut down.** The coordinator wrote the incident report and all four agents
+   exited. Only the lightweight watcher kept running, waiting for the next problem.
+
+### Behind the scenes
+
+- **The agents never touched the router themselves.** Each one ran as a sandboxed process
+  with no network access, no passwords, and no way to reach the routers. Every action was a
+  request to the kernel, checked every time.
+- **Each agent got only the permissions it needed.** The diagnosis agent could only read. If
+  it tries to change something (and the model does suggest it), the kernel refuses.
+- **Everything was recorded.** A hash-linked audit log (149 records in this run) shows
+  `apr-0001 approved by bob, via Slack user U0… (✅)` and that the change executed exactly
+  once. Routers were checked independently afterwards with plain `vtysh`: the session was
+  Established, and `lab-r2` had re-learned `192.0.2.0/24`.
+
+### Why it matters
+
+| | Without AgenticOS | With AgenticOS |
+|---|---|---|
+| Detection | An alarm wakes an engineer | Automatic, within seconds |
+| Diagnosis | The engineer logs in and investigates (minutes) | Done in under a second |
+| Human effort | Diagnose, plan, type commands, verify | Read one Slack message, tap ✅ |
+| Risk | Human typing errors at 3am | Exact commands shown up front, tested on a twin, applied once |
+| Audit | Notes written afterwards, if at all | Complete, automatic, tamper-evident |
+
+The whole incident took **73 seconds**, and **66 of those were the human deciding**; the
+machine work took about 6 seconds. The AI did the work, the human kept the authority, and
+the kernel enforced the boundary between the two.
+
+Reproduce it: [labs/frr-bgp](labs/frr-bgp/README.md).
+
 ## Architecture
 
 ```
