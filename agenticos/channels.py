@@ -32,6 +32,10 @@ class SlackApprovalChannel:
                  api_base: str = "https://slack.com/api", poll_s: float = 3.0):
         if not token:
             raise ValueError("Slack bot token required (SLACK_BOT_TOKEN)")
+        if token.startswith("xoxp-"):
+            raise ValueError("that is a *user* token (xoxp-), which acts as a person with their "
+                             "full rights. Use the Bot User OAuth Token (xoxb-) from "
+                             "OAuth & Permissions, and revoke the user token.")
         self.token, self.channel, self.approvers = token, channel, dict(approvers)
         self.api_base, self.poll_s = api_base.rstrip("/"), poll_s
         self.posted: dict[str, str] = {}          # approval id -> message ts

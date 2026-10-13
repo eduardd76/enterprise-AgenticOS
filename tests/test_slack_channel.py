@@ -152,3 +152,8 @@ def test_requester_cannot_approve_own_change_even_via_slack(run, slack):
 def test_channel_requires_token():
     with pytest.raises(ValueError):
         SlackApprovalChannel("", "C", {})
+
+
+def test_user_tokens_are_refused():
+    with pytest.raises(ValueError, match="user"):
+        SlackApprovalChannel("xoxp-123", "C", {})

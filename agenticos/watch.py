@@ -188,7 +188,11 @@ async def _post_safe(slack, k, aid: str, pkg: dict) -> None:
     except Exception as e:                       # CLI approval still works if Slack is down
         k.store.audit("approval.channel_error", approval_id=aid, channel="slack",
                       error=str(e)[:200])
-        print(f"  ! Slack post failed for {aid} ({e}); approve via CLI instead")
+        hint = ""
+        if "CERTIFICATE_VERIFY_FAILED" in str(e):
+            hint = ("\n    Python has no CA certificates. On macOS run: "
+                    "\"/Applications/Python 3.12/Install Certificates.command\"")
+        print(f"  ! Slack post failed for {aid} ({e}); approve via CLI instead{hint}")
 
 
 def approve(db: str, approval_id: str, principal: str, deny: bool, note: str) -> int:
