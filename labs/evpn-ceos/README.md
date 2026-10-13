@@ -24,6 +24,27 @@ It's the scenario where fixed rules stop being enough.
 | 1 | leaf2 `Ethernet1` (uplink) shut down | leaf2 falls off the fabric: underlay and EVPN BGP down | Simple rules ("interface down → bring it up") |
 | 2 | leaf2 `Ethernet3` (host2's port) drifted to **VLAN 20** (tenant-b) | After fault 1 is fixed, BGP, EVPN and VXLAN all look healthy, yet host1 still can't reach host2 | Needs reasoning: tenant intent says VLAN 10, the port says VLAN 20, and host2's MAC is learned in the wrong VLAN |
 
+## Result: scripted rules vs. a local LLM (real run)
+
+Same fabric, same two faults, same kernel, same approvals. Only the reasoner differs.
+
+| | Scripted rules (baseline) | Qwen 2.5 7B (local, Ollama) |
+|---|---|---|
+| Round 1 | Found the shut uplink → fixed | Found the **VLAN drift** ("Ethernet3 is in VLAN 20 instead of 10") → fixed |
+| Round 2 | Nothing it recognises → **escalated to a human** | Found the shut uplink → fixed |
+| Faults fixed | **1 of 2** | **2 of 2** |
+| Service host1 → host2 | still **unreachable** | **reachable** (0% loss) |
+| Model tried to apply its own fix | refused (`UNAUTHORIZED`) | refused twice (`UNAUTHORIZED`) |
+| Production changes | 1, each approved, applied once | 2, each approved, applied once |
+| Total time | ~97 s | ~166 s |
+
+Notes on the Qwen run:
+- **The twin's honesty mattered.** The approval package for Qwen's first fix predicted
+  `service: unreachable`, telling the approver up front that another fault remained.
+- **Nothing was taken on trust.** Every hypothesis was checked against live evidence before
+  it could be proposed, and the switches were verified independently afterwards with plain
+  EOS commands.
+
 ## How AgenticOS handles it: rounds
 
 Each round:
@@ -43,8 +64,9 @@ to a human), or after 3 rounds.
 ## Run it
 
 ```bash
-# one-time: import the cEOS image (download cEOS-lab from arista.com with a free account)
-docker import --platform linux/amd64 cEOS-lab-4.31.10M.tar.xz ceos:4.31.10M
+# one-time: import the cEOS image (download from arista.com with a free account)
+docker import --platform linux/arm64 cEOSarm-lab-4.34.8M.tar.xz ceosarm:4.34.8M   # Apple Silicon
+# x86 hosts: docker import cEOS-lab-<ver>.tar.xz ceos:<ver> and set it in topology.clab.yml
 
 labs/evpn-ceos/lab.sh up          # deploy with containerlab (runs as a container)
 
@@ -66,9 +88,13 @@ it by hand.
 
 - **cEOS is licensed by Arista**, so this lab can't run in public CI. CI covers the driver
   logic, change allowlist, twin and evidence checks offline (`tests/test_eos_driver.py`).
-- **Apple Silicon:** cEOS-lab 4.31 is x86_64 and runs under emulation in OrbStack or Docker
-  Desktop. Expect a 5–10 minute boot and about 1.2–3 GB RAM per switch. An arm64 cEOS build
-  boots much faster.
+- **Apple Silicon: use the native ARM image (`cEOSarm-lab`, 4.32+).** With
+  `cEOSarm-lab-4.34.8M`, the whole fabric boots and converges in under 50 s, a CLI call takes
+  about 0.1 s, and each switch uses about 0.9 GB RAM. The x86 `cEOS-lab` image under emulation
+  was unusable here: one CLI call took about 68 s, and three switches never converged.
+- **Local LLM tip:** AgenticOS caps every model call (`AOS_MODEL_MAX_TOKENS`, default 1024).
+  Without a cap, JSON-mode generation can loop on whitespace and block Ollama's only slot for
+  every later request.
 - **The twin is a rule-based model** of fabric health elements: uplinks, host-port VLANs,
   VNI bindings. It is not an emulated EOS.
 - **Allowed changes** (`EosLab.commands`): interface admin up/down, and host-port access VLAN

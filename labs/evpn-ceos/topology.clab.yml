@@ -6,7 +6,7 @@ name: evpn-dc
 topology:
   kinds:
     arista_ceos:
-      image: ceos:4.31.10M
+      image: ceosarm:4.34.8M
     linux:
       image: alpine:3.20
   nodes:

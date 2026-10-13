@@ -111,7 +111,9 @@ class EosLab:
                 for e in mac.get("unicastTable", {}).get("tableEntries", [])]
         return {"device": device, "role": dev["role"], "interfaces": ifaces,
                 "underlay_bgp": _peers(ipv4), "evpn_bgp": _peers(evpn),
-                "vni_to_vlan": bindings, "remote_vteps": vtep.get("vteps", []),
+                "vni_to_vlan": bindings,
+                "remote_vteps": sorted({v for i in vtep.get("interfaces", {}).values()
+                                        for v in i.get("vteps", [])}),
                 "mac_table": macs[:20],
                 "host_ports": dev.get("host_ports", {}), "snapshot": self.state_hash(device)[:12]}
 

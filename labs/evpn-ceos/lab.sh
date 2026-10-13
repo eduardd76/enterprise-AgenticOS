@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Small EVPN/VXLAN data center on Arista cEOS, deployed with containerlab (run as a container,
-# so nothing is installed on the host). Needs the ceos:4.31.10M image (see README).
+# so nothing is installed on the host). Needs a cEOS image (see README).
 set -euo pipefail
 cd "$(dirname "$0")"
 CLAB_IMAGE=ghcr.io/srl-labs/clab:0.81.0
@@ -14,11 +14,13 @@ ping_ok() { docker exec clab-evpn-dc-host1 ping -c 3 -W 1 10.10.10.12 >/dev/null
 
 case "${1:-}" in
   up)
-    docker image inspect ceos:4.31.10M >/dev/null 2>&1 || {
-      echo "missing image ceos:4.31.10M - import it first:"
-      echo "  docker import --platform linux/amd64 cEOS-lab-4.31.10M.tar.xz ceos:4.31.10M"; exit 1; }
+    IMG=$(grep -m1 "image: ceos" topology.clab.yml | awk '{print $2}')
+    docker image inspect "$IMG" >/dev/null 2>&1 || {
+      echo "missing image $IMG - import it first, e.g.:"
+      echo "  docker import --platform linux/arm64 cEOSarm-lab-4.34.8M.tar.xz ceosarm:4.34.8M   # Apple Silicon"
+      echo "  docker import cEOS-lab-<ver>.tar.xz ceos:<ver> and edit topology.clab.yml           # x86"; exit 1; }
     clab deploy -t topology.clab.yml --reconfigure
-    echo -n "waiting for the fabric (EOS boot + BGP + EVPN; ~2-4 min under emulation)"
+    echo -n "waiting for the fabric (EOS boot + BGP + EVPN)"
     for i in $(seq 1 60); do
       if ping_ok; then echo " ready: host1 <-> host2 over VXLAN"; exit 0; fi
       echo -n "."; sleep 5

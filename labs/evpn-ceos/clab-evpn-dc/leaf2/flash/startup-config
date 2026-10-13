@@ -1,6 +1,21 @@
-hostname leaf2
+! Startup-config last modified at Tue Oct 13 14:01:10 2026 by root
+! device: leaf2 (cEOSLab, EOS-4.34.8M-49693515.4348M (engineering build))
+!
+no aaa root
+!
+no service interface inactive port-id allocation disabled
+!
+transceiver qsfp default-mode 4x10G
 !
 service routing protocols model multi-agent
+!
+hostname leaf2
+!
+spanning-tree mode mstp
+!
+system l1
+   unsupported speed action error
+   unsupported error-correction action error
 !
 vlan 10
    name tenant-a
@@ -19,6 +34,11 @@ interface Ethernet3
 !
 interface Loopback0
    ip address 10.255.0.12/32
+!
+interface Management0
+   ip address 172.20.20.5/24
+   ipv6 address 3fff:172:20:20::3/64
+   ipv6 address 3fff:172:20:20::5/64
 !
 interface Vxlan1
    vxlan source-interface Loopback0
@@ -46,5 +66,12 @@ router bgp 65002
    !
    address-family ipv4
       no neighbor 10.255.0.1 activate
+!
+router multicast
+   ipv4
+      software-forwarding kernel
+   !
+   ipv6
+      software-forwarding kernel
 !
 end

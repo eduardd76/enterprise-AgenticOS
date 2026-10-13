@@ -87,3 +87,32 @@ def test_fabric_validator_and_evidence_check():
 
 def test_eos_json_stream_parsing():
     assert _parse_json_stream('{"a": 1}\n{"b": [2]}\n') == [{"a": 1}, {"b": [2]}]
+
+
+def _evpn_up() -> bool:
+    import subprocess
+    if os.environ.get("AOS_EVPN_LAB") != "1":
+        return False
+    r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", "clab-evpn-dc-leaf2"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() == "true"
+
+
+@pytest.mark.skipif(not _evpn_up(), reason="set AOS_EVPN_LAB=1 with labs/evpn-ceos/lab.sh up")
+def test_live_baseline_fixes_one_fault_then_escalates(tmp_path):
+    """Scripted rules on the real two-fault fabric: fixes the shutdown, cannot see the VLAN
+    drift, and escalates instead of guessing. Leaves the fabric repaired afterwards."""
+    import asyncio
+    import subprocess
+    from agenticos.fabric_cli import fabric
+    os.environ.pop("AOS_MODEL_URL", None)
+    here = os.path.dirname(__file__)
+    try:
+        rc = asyncio.run(fabric(str(tmp_path / "f.db"), None, False))
+        assert rc == 1                                      # service still unreachable
+        lab = EosLab(INV)
+        assert lab.inspect("leaf2")["interfaces"]["Ethernet1"]["admin"] == "up"   # fault 1 fixed
+        assert lab.inspect("leaf2")["interfaces"]["Ethernet3"]["vlan"] == 20      # fault 2 remains
+    finally:
+        subprocess.run([os.path.join(here, "..", "labs", "evpn-ceos", "lab.sh"), "reset"],
+                       capture_output=True)

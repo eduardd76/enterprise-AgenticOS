@@ -151,7 +151,9 @@ async def local_llm_infer(ctx: CallContext, target: str, args: dict) -> dict:
             "messages": [{"role": "system", "content":
                           FABRIC_PROMPT if args.get("task") == "fabric_diagnosis" else SYSTEM_PROMPT},
                          {"role": "user", "content": json.dumps(args.get("evidence", {}))}],
-            "temperature": 0, "response_format": {"type": "json_object"}}
+            "temperature": 0, "response_format": {"type": "json_object"},
+            # Hard cap: JSON mode can loop on whitespace forever and hog the model's only slot.
+            "max_tokens": int(os.environ.get("AOS_MODEL_MAX_TOKENS", "1024"))}
 
     def call() -> dict:
         req = urllib.request.Request(url, json.dumps(body).encode(),

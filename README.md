@@ -122,6 +122,12 @@ python3 -m agenticos demo --lab --model qwen2.5:7b-instruct     # local model vi
 This runs a real outage on real FRR routers in Docker, diagnosed by a local LLM, and fixed
 through the kernel with approval, exactly-once execution and verification.
 
+**Two faults, real Arista switches:** [labs/evpn-ceos](labs/evpn-ceos/README.md) is a small
+EVPN/VXLAN data center on cEOS with a multi-fault incident: an uplink shut down plus a host
+port that drifted into the wrong VLAN. With scripted rules, AgenticOS fixes 1 of 2 faults and
+escalates. With a local Qwen model, it fixes both in two approved rounds, and the tenant
+service is restored. Run it with `python3 -m agenticos fabric --model qwen2.5:7b-instruct`.
+
 **Always-on mode:** `python3 -m agenticos watch` monitors the routers and opens an incident by
 itself when a BGP link breaks. Agents start and ask a human to approve, either in **Slack**
 (react ✅/❌; outbound-only, no public URL) or with `agenticos approve apr-0001 --as bob`.

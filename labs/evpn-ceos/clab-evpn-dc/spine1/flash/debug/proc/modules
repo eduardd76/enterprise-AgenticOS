@@ -1,7 +1,0 @@
-vrf 32768 0 [permanent], Live 0xffffad5d8b5d0000
-sch_netem 20480 0 - Live 0xffffad5d8b5c8000
-mpls_gso 12288 0 - Live 0xffffad5d8b5c2000
-mpls_iptunnel 12288 0 - Live 0xffffad5d8b5b1000
-mpls_router 32768 1 mpls_iptunnel, Live 0xffffad5d8b5b7000
-ip_tunnel 28672 1 mpls_router, Live 0xffffad5d8b5a7000
-cfg80211 847872 0 - Live 0xffffad5d8b4d4000
