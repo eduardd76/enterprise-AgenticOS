@@ -31,3 +31,42 @@ jobs:
       - run: python -m pytest -q
       - run: python -m agenticos demo --db var/ci.db
       - run: python -m agenticos lifecycle --db var/ci-lc.db
+
+  # Real routers: two FRR containers with a live eBGP session. AgenticOS fixes a real
+  # interface-shutdown outage through the kernel. The scripted reasoner keeps this
+  # deterministic; local-LLM runs are a manual/local concern (models are multi-GB).
+  lab:
+    runs-on: ubuntu-24.04
+    env:
+      AOS_REQUIRE_SANDBOX: "1"
+      AOS_LAB: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - run: python -m pip install -e '.[dev]'
+      - name: Start FRR lab
+        run: labs/frr-bgp/lab.sh up
+      - name: Live-lab tests
+        run: python -m pytest -q tests/test_frr_driver.py -rs
+      - name: Reset lab and run the real-router demo
+        run: |
+          labs/frr-bgp/lab.sh up
+          python -m agenticos demo --lab --db var/lab.db
+      - name: Independent check (plain vtysh, not AgenticOS)
+        run: |
+          docker exec aos-lab-r2 vtysh -c "show ip bgp" | tee /dev/stderr | grep -q "192.0.2.0/24"
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          labs/frr-bgp/lab.sh status || true
+          docker logs aos-lab-r1 2>&1 | tail -50 || true
+          ls var/logs 2>/dev/null && tail -n 30 var/logs/*.log || true
+      - name: Tear down
+        if: always()
+        run: labs/frr-bgp/lab.sh down

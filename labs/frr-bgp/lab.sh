@@ -20,10 +20,11 @@ case "${1:-}" in
       docker restart aos-lab-$r >/dev/null
     done
     echo -n "waiting for BGP"
-    for _ in $(seq 1 30); do
-      if docker exec aos-lab-r1 vtysh -c "show bgp summary" 2>/dev/null | grep -qE "10\.10\.0\.3 .* [0-9]+ +[0-9]+ +N/A|10\.10\.0\.3 +4 +65002 .* 1 +"; then break; fi
-      st=$(docker exec aos-lab-r1 vtysh -c "show bgp neighbors 10.10.0.3 json" 2>/dev/null | grep -o '"bgpState":"[A-Za-z]*"' || true)
-      [ "$st" = '"bgpState":"Established"' ] && break
+    for i in $(seq 1 60); do
+      st=$(docker exec aos-lab-r1 vtysh -c "show bgp neighbors 10.10.0.3 json" 2>/dev/null | \
+           python3 -c 'import json,sys; print(json.load(sys.stdin)["10.10.0.3"]["bgpState"])' 2>/dev/null || true)
+      [ "$st" = "Established" ] && break
+      [ "$i" = 60 ] && { echo " FAILED: BGP not Established after 60s (state: ${st:-unknown})"; exit 1; }
       echo -n "."; sleep 1
     done
     echo; docker exec aos-lab-r1 vtysh -c "show bgp summary" ;;
