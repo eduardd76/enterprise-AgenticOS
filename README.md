@@ -124,3 +124,4 @@ These are the enterprise-adoption priorities; see `CONFORMANCE.md` for detail.
 
 Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities
 privately via [SECURITY.md](SECURITY.md). Licensed under [Apache-2.0](LICENSE).
+Copyright 2026 vExpertAI. Commercial drivers, agents and support are available from vExpertAI.
