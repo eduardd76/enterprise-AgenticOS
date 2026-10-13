@@ -22,9 +22,30 @@ def _tokens(obj) -> int:
     return max(1, len(json.dumps(obj)) // 4)
 
 
+def _mock_fabric(ev: dict) -> dict:
+    """The scripted baseline knows ONE rule: a shut interface should be brought up.
+    It has no notion of tenant intent, so VLAN drift is invisible to it — by design."""
+    hyps = []
+    for dev, d in sorted(ev.get("devices", {}).items()):
+        for iface, s in sorted(d.get("interfaces", {}).items()):
+            if s.get("admin") == "down":
+                hyps.append({"id": f"H{len(hyps) + 1}", "likelihood": 0.9,
+                             "claim": f"{dev} {iface} is administratively down",
+                             "remediation": {"device": dev, "interface": iface, "admin": "up"}})
+    hyps.append({"id": "H0", "claim": "Cause not identified by rules", "likelihood": 0.2,
+                 "remediation": None})
+    first = hyps[0]["remediation"]
+    return {"hypotheses": hyps, "suggested_action":
+            {"op": "network.config.apply", "change": first} if first else None}
+
+
 async def mock_infer(ctx: CallContext, target: str, args: dict) -> dict:
     """Deterministic stand-in for an LLM: produces competing hypotheses from evidence."""
     ev = args.get("evidence", {})
+    if args.get("task") == "fabric_diagnosis":
+        out = _mock_fabric(ev)
+        out["_tokens"] = _tokens(args) + _tokens(out)
+        return out
     bgp, iface = ev.get("bgp", {}), ev.get("interface", {})
     hypotheses = []
     if iface.get("admin") == "down":
@@ -65,8 +86,34 @@ Allowed remediation objects (anything else will be rejected):
 Use null when the cause is outside our control (e.g. the remote peer). Order hypotheses by likelihood."""
 
 
+FABRIC_PROMPT = """You are a data-center network diagnosis model inside a governed operations kernel.
+You receive JSON evidence from an EVPN/VXLAN fabric: the tenant service intent (its VLAN and
+VNI and which host sits on which leaf port), an end-to-end reachability probe, per-switch
+interfaces (admin/link state, access VLAN), underlay BGP, EVPN BGP, VNI-to-VLAN bindings, MAC
+tables, and the history of fixes already applied in this incident.
+Find EVERY independent fault that breaks the tenant service; there may be more than one.
+Reply with ONLY a JSON object:
+{"hypotheses": [{"id": "H1", "claim": "<one sentence citing the evidence>", "likelihood": <0..1>,
+                 "remediation": <object or null>}],
+ "suggested_action": {"op": "network.config.apply", "change": <object>} or null}
+Allowed remediation objects (anything else will be rejected):
+  {"device": "<switch>", "interface": "<interface>", "admin": "up"}           interface shut down
+  {"device": "<switch>", "interface": "<host port>", "access_vlan": <vlan>}   host port in the
+                                                                             wrong VLAN for its tenant
+Never propose a fix that is already in the history. Order hypotheses by likelihood."""
+
+
 def _valid_change(c) -> bool:
     if not isinstance(c, dict):
+        return False
+    if "device" in c:                                   # fabric-scoped changes
+        rest = {k: v for k, v in c.items() if k != "device"}
+        if not isinstance(c["device"], str) or not isinstance(rest.get("interface"), str):
+            return False
+        if set(rest) == {"interface", "admin"}:
+            return rest["admin"] in ("up", "down")
+        if set(rest) == {"interface", "access_vlan"}:
+            return isinstance(rest["access_vlan"], int) and 1 <= rest["access_vlan"] <= 4094
         return False
     if set(c) == {"interface", "admin"}:
         return isinstance(c["interface"], str) and c["admin"] in ("up", "down")
@@ -101,7 +148,8 @@ def validate_model_output(out) -> dict:
 async def local_llm_infer(ctx: CallContext, target: str, args: dict) -> dict:
     url = os.environ["AOS_MODEL_URL"].rstrip("/") + "/v1/chat/completions"
     body = {"model": os.environ.get("AOS_MODEL_NAME", "local"),
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+            "messages": [{"role": "system", "content":
+                          FABRIC_PROMPT if args.get("task") == "fabric_diagnosis" else SYSTEM_PROMPT},
                          {"role": "user", "content": json.dumps(args.get("evidence", {}))}],
             "temperature": 0, "response_format": {"type": "json_object"}}
 

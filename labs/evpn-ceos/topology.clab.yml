@@ -1,0 +1,26 @@
+# Small EVPN/VXLAN data center: 1 spine, 2 leaves (Arista cEOS), 2 servers.
+# Tenant "tenant-a" = VLAN 10 stretched over VXLAN VNI 10010 between leaf1 and leaf2.
+# Underlay: eBGP on point-to-point /31s. Overlay: eBGP EVPN via the spine (loopbacks).
+name: evpn-dc
+
+topology:
+  kinds:
+    arista_ceos:
+      image: ceos:4.31.10M
+    linux:
+      image: alpine:3.20
+  nodes:
+    spine1: { kind: arista_ceos, startup-config: configs/spine1.cfg }
+    leaf1:  { kind: arista_ceos, startup-config: configs/leaf1.cfg }
+    leaf2:  { kind: arista_ceos, startup-config: configs/leaf2.cfg }
+    host1:
+      kind: linux
+      exec: ["ip link set eth1 up", "ip addr add 10.10.10.11/24 dev eth1"]
+    host2:
+      kind: linux
+      exec: ["ip link set eth1 up", "ip addr add 10.10.10.12/24 dev eth1"]
+  links:
+    - endpoints: ["spine1:eth1", "leaf1:eth1"]
+    - endpoints: ["spine1:eth2", "leaf2:eth1"]
+    - endpoints: ["leaf1:eth3", "host1:eth1"]
+    - endpoints: ["leaf2:eth3", "host2:eth1"]

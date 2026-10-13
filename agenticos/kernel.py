@@ -50,6 +50,10 @@ DEFAULT_AGENT_TYPES = {
     "noc.change": "agenticos.agents.noc:ChangeAgent",
     "noc.verifier": "agenticos.agents.noc:Verifier",
     "test.script": "agenticos.agents.testing:ScriptAgent",
+    "fabric.coordinator": "agenticos.agents.fabric:FabricCoordinator",
+    "fabric.diag": "agenticos.agents.fabric:FabricDiagnostic",
+    "fabric.change": "agenticos.agents.fabric:FabricChange",
+    "fabric.verifier": "agenticos.agents.fabric:FabricVerifier",
 }
 
 

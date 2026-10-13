@@ -1,0 +1,25 @@
+{
+  "_comment": "Source of truth for the EVPN lab (stands in for Nautobot/NetBox).",
+  "service": {"name": "tenant-a", "vlan": 10, "vni": 10010,
+              "probe": {"from": "host1", "to": "host2", "to_ip": "10.10.10.12"}},
+  "vlans": {"10": "tenant-a", "20": "tenant-b"},
+  "devices": {
+    "spine1": {"container": "clab-evpn-dc-spine1", "tenant": "customer-a", "role": "spine",
+               "asn": 65000, "loopback": "10.255.0.1",
+               "interfaces": {"Ethernet1": "leaf1", "Ethernet2": "leaf2"}},
+    "leaf1":  {"container": "clab-evpn-dc-leaf1", "tenant": "customer-a", "role": "leaf",
+               "asn": 65001, "loopback": "10.255.0.11",
+               "interfaces": {"Ethernet1": "spine1", "Ethernet3": "host1"},
+               "uplinks": ["Ethernet1"], "host_ports": {"Ethernet3": "host1"}},
+    "leaf2":  {"container": "clab-evpn-dc-leaf2", "tenant": "customer-a", "role": "leaf",
+               "asn": 65002, "loopback": "10.255.0.12",
+               "interfaces": {"Ethernet1": "spine1", "Ethernet3": "host2"},
+               "uplinks": ["Ethernet1"], "host_ports": {"Ethernet3": "host2"}}
+  },
+  "hosts": {
+    "host1": {"container": "clab-evpn-dc-host1", "tenant": "customer-a", "ip": "10.10.10.11",
+              "leaf": "leaf1", "port": "Ethernet3"},
+    "host2": {"container": "clab-evpn-dc-host2", "tenant": "customer-a", "ip": "10.10.10.12",
+              "leaf": "leaf2", "port": "Ethernet3"}
+  }
+}

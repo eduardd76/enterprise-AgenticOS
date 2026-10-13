@@ -9,6 +9,7 @@
               (with human approval) and exit; keep watching.
   approve     Decide a pending approval from another terminal: approve apr-0001 --as bob
   approvals   List pending approvals.
+  fabric      Two-fault EVPN/VXLAN incident on Arista cEOS (labs/evpn-ceos), solved in rounds.
 """
 
 from __future__ import annotations
@@ -284,7 +285,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="agenticos", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["demo", "lifecycle", "ps", "audit", "watch",
-                                        "approve", "approvals"])
+                                        "approve", "approvals", "fabric"])
     ap.add_argument("approval_id", nargs="?", help="for `approve`: e.g. apr-0001")
     ap.add_argument("--as", dest="principal", default="bob", help="approver (approve)")
     ap.add_argument("--deny", action="store_true", help="deny instead of approve")
@@ -308,6 +309,11 @@ def main() -> None:
         raise SystemExit(asyncio.run(demo(a.db, a.interactive, a.policy, a.lab, a.model)))
     if a.command == "lifecycle":
         raise SystemExit(asyncio.run(lifecycle(a.db)))
+    if a.command == "fabric":
+        from .fabric_cli import fabric
+        db = a.db if a.db != DEFAULT_DB else "var/fabric.db"
+        raise SystemExit(asyncio.run(fabric(db, a.model, a.interactive,
+                                            approval_timeout_s=a.approval_timeout)))
     if a.command in ("watch", "approve", "approvals"):
         from . import watch as w
         db = a.db if a.db != DEFAULT_DB else "var/watch.db"

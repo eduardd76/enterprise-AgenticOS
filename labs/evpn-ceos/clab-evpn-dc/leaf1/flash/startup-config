@@ -1,0 +1,50 @@
+hostname leaf1
+!
+service routing protocols model multi-agent
+!
+vlan 10
+   name tenant-a
+!
+vlan 20
+   name tenant-b
+!
+interface Ethernet1
+   description uplink-to-spine1
+   no switchport
+   ip address 10.0.1.1/31
+!
+interface Ethernet3
+   description host1
+   switchport access vlan 10
+!
+interface Loopback0
+   ip address 10.255.0.11/32
+!
+interface Vxlan1
+   vxlan source-interface Loopback0
+   vxlan udp-port 4789
+   vxlan vlan 10 vni 10010
+!
+ip routing
+!
+router bgp 65001
+   router-id 10.255.0.11
+   neighbor 10.0.1.0 remote-as 65000
+   neighbor 10.255.0.1 remote-as 65000
+   neighbor 10.255.0.1 update-source Loopback0
+   neighbor 10.255.0.1 ebgp-multihop 3
+   neighbor 10.255.0.1 send-community extended
+   redistribute connected
+   !
+   vlan 10
+      rd 10.255.0.11:10010
+      route-target both 10010:10010
+      redistribute learned
+   !
+   address-family evpn
+      neighbor 10.255.0.1 activate
+   !
+   address-family ipv4
+      no neighbor 10.255.0.1 activate
+!
+end
