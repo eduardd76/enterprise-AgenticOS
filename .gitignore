@@ -15,3 +15,7 @@ vExpertAI_*.md
 *.pdf
 .remember/
 .DS_Store
+
+# containerlab runtime state (node flash, TLS keys, authorized_keys) - never commit
+clab-*/
+.clab*
