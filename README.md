@@ -14,6 +14,75 @@ records why.
 > [CONFORMANCE.md](CONFORMANCE.md). If you operate regulated or sovereign infrastructure and
 > want to shape the roadmap, open a discussion.
 
+## How it helps enterprises
+
+**In one sentence:** AgenticOS lets an enterprise use AI agents on its real production systems
+(networks, servers, security tools) without the AI being able to cause damage, and with proof
+of everything it did.
+
+### The problem enterprises have today
+
+Companies want AI agents to do real operations work: fix a network outage at 3am, investigate a
+security alert, change a configuration. The AI is often good enough. But the security officer,
+the compliance team and the network manager all say **no**, for four reasons:
+
+1. **"What if it does something stupid?"** Models sometimes invent answers or get manipulated by
+   malicious input (prompt injection). If the agent holds the router passwords, one bad answer
+   can take down the network.
+2. **"Who allowed this?"** Auditors and regulators ask who authorised a production change, why,
+   and based on what evidence. Most agent tools keep chat logs, not proof.
+3. **"Can customer A's AI see customer B's data?"** Service providers and large companies run many
+   customers or business units on shared systems.
+4. **"What happens when it fails halfway?"** If the agent crashes mid-change, did the change happen
+   once, twice, or not at all?
+
+So most AI agents stay read-only assistants, and the real value, automated operations, stays
+locked up.
+
+### What AgenticOS does about it
+
+It sits **between the AI agents and the production systems** as a control layer:
+
+| Enterprise concern | What AgenticOS does |
+|---|---|
+| AI doing something stupid | Agents never hold passwords or direct access. Every action is checked against what that agent is allowed to do, and an unapproved action is simply refused. |
+| Risky changes | A production change must be tested on a simulated copy of the network, pass a confidence check, and be approved by a named human. The device is re-checked right before the change. |
+| Who allowed this? | Every action is recorded with who requested it, who approved it, what evidence was used and what happened, in a tamper-evident log. |
+| Customer separation | One customer's agents can't see or touch another customer's devices, data or messages. |
+| Crashes mid-change | A crashed agent restarts where it stopped; a change is never applied twice. |
+| Different risk tolerance | Each customer sets how cautious the system must be: strict for a bank, relaxed for a lab. |
+
+### A concrete example
+
+At 3am, a BGP session (the link between the company network and an internet provider) goes down.
+
+- **Without AI:** an engineer is woken up and spends 40 minutes diagnosing and fixing it.
+- **With an uncontrolled AI agent:** it might fix it in 2 minutes, or change the wrong thing and
+  cause a bigger outage. No bank or telco can approve that.
+- **With AgenticOS:** the agent diagnoses the cause in seconds using read-only access. It
+  proposes a fix and tests it on the simulated network. The on-call engineer gets one message:
+  *"BGP down, cause found, here's the fix; the simulation shows it restores the link without
+  breaking anything else; approve?"* The engineer taps **approve**, the fix is applied exactly
+  once and verified automatically, and the auditor later sees the full record.
+
+The engineer goes from 40 minutes of work to a 1-minute approval, with no extra risk.
+
+### The business value
+
+- **Faster incident resolution:** less downtime, fewer engineers woken at night.
+- **AI that is allowed into production:** the security officer can say yes, because the controls
+  can be inspected and tested.
+- **Compliance readiness:** regulations such as the EU AI Act require record-keeping and human
+  oversight for this kind of system, and AgenticOS produces both by design.
+- **No vendor lock-in:** it works with local, on-premises models, which matters for banks, telcos
+  and governments that can't send data to the cloud.
+
+**Who it's for:** telecom operators, banks, internet exchanges, large enterprises and government
+networks: organisations with critical infrastructure and strict regulators. The control layer
+is open source so their security teams can inspect it. vExpertAI provides production agents
+(AI NOC, Cairn), connectors to real Cisco/Juniper/Arista equipment, network simulation,
+deployment and support.
+
 ## Why an OS, not another agent framework
 
 Agent frameworks run the reasoning loop. They don't answer the questions that block
