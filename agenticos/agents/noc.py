@@ -6,6 +6,8 @@ a crash-restarted agent continues where it stopped instead of redoing work.
 
 from __future__ import annotations
 
+import time
+
 from ..sdk import Agent, SyscallFailed
 
 BASE = ["checkpoint.*", "ipc.send", "ipc.recv"]
@@ -28,7 +30,7 @@ class Coordinator(Agent):
                 "capabilities": BASE + ["network.bgp.inspect", "network.interface.inspect",
                                         "model.infer", "confidence.evaluate", "memory.read"],
                 "targets": [dev], "memory_paths": evidence_paths,
-                "budget_calls": 30, "budget_tokens": 4000, "ttl_s": 120})["result"]["agent_id"]
+                "budget_calls": 30, "budget_tokens": 4000, "ttl_s": 400})["result"]["agent_id"]
             st = {"stage": "spawned_diag", "diag": diag}
             s.checkpoint(st)
         if st["stage"] == "spawned_diag":
@@ -37,7 +39,7 @@ class Coordinator(Agent):
             st["stage"] = "diagnosing"
             s.checkpoint(st)
         if st["stage"] == "diagnosing":
-            m = self._await("DIAGNOSIS_RESULT", 60)
+            m = self._await("DIAGNOSIS_RESULT", 300)
             st.update(stage="diagnosed", diagnosis=m["payload"], refs=m["evidence_refs"])
             s.checkpoint(st)
 
@@ -71,13 +73,13 @@ class Coordinator(Agent):
         if st["stage"] == "remediated":
             ver = s.call("agent.spawn", "noc.verifier", role="post-change-verification", grant={
                 "capabilities": BASE + ["network.bgp.inspect"], "targets": [dev],
-                "budget_calls": 6, "budget_tokens": 0, "ttl_s": 60})["result"]["agent_id"]
+                "budget_calls": 40, "budget_tokens": 0, "ttl_s": 120})["result"]["agent_id"]
             s.send(ver, "VERIFY_REQUEST", {"device": dev, "neighbor": nbr},
                    correlation_id=inc, message_id=f"{inc}-verify-request")
             st.update(stage="verifying", verifier=ver)
             s.checkpoint(st)
         if st["stage"] == "verifying":
-            m = self._await("VERIFY_RESULT", 60)
+            m = self._await("VERIFY_RESULT", 120)
             st.update(stage="verified", verification=m["payload"])
             s.checkpoint(st)
         outcome = "resolved" if st["verification"]["healthy"] else "remediation did not restore service"
@@ -163,7 +165,8 @@ class BgpDiagnostic(Agent):
                correlation_id=st["request"]["correlation_id"],
                message_id=f"{st['request']['correlation_id']}-diagnosis-result",
                evidence_refs=st["refs"])
-        return {"selected": best["id"], "decision": c["decision"], "overreach": st["overreach"]}
+        return {"selected": best["id"], "claim": best["claim"], "decision": c["decision"],
+                "overreach": st["overreach"], "model_provider": st.get("model_provider")}
 
 
 class ChangeAgent(Agent):
@@ -223,9 +226,14 @@ class Verifier(Agent):
         s = self.sys
         m = s.recv(timeout_s=60, type="VERIFY_REQUEST")
         dev, nbr = m["payload"]["device"], m["payload"]["neighbor"]
-        r = s.call("network.bgp.inspect", dev, neighbor=nbr)
+        # Real protocols converge over seconds: poll, then judge.
+        for attempt in range(30):
+            r = s.call("network.bgp.inspect", dev, neighbor=nbr)
+            if r["result"]["state"] == "Established":
+                break
+            time.sleep(1)
         payload = {"healthy": r["result"]["state"] == "Established", "state": r["result"]["state"],
-                   "evidence_ref": r["evidence_ref"]}
+                   "polls": attempt + 1, "evidence_ref": r["evidence_ref"]}
         s.send(m["source"], "VERIFY_RESULT", payload, correlation_id=m["correlation_id"],
                message_id=f"{m['correlation_id']}-verify-result")
         return payload

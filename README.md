@@ -112,6 +112,17 @@ python3 -m agenticos audit --lineage del-0001   # verify audit chain + actions u
 python3 -m pytest -q                        # 81 conformance, red-team and process tests
 ```
 
+### Real routers + local LLM
+
+```bash
+labs/frr-bgp/lab.sh up                                          # 2 real FRR routers, eBGP
+python3 -m agenticos demo --lab --model qwen2.5:7b-instruct     # local model via Ollama
+```
+
+This runs a real outage on real FRR routers in Docker, diagnosed by a local LLM, and fixed
+through the kernel with approval, exactly-once execution and verification. See
+[labs/frr-bgp](labs/frr-bgp/README.md).
+
 Sandboxing is automatic on macOS (`sandbox-exec`) and on Linux with `bubblewrap` installed.
 Set `AOS_REQUIRE_SANDBOX=1` to refuse to run agents unsandboxed.
 
@@ -184,9 +195,10 @@ These are the enterprise-adoption priorities; see `CONFORMANCE.md` for detail.
 
 ## Limits of v0.1 (honest list)
 
-- The network is simulated (FRR/Containerlab drivers are planned).
-- The model is a deterministic mock; the OpenAI-compatible local-LLM provider is untested
-  against a live server.
+- Real-device support is one FRR driver (vtysh), validated in a 2-router Docker lab.
+  Cisco/Juniper/Arista drivers and a full emulated digital twin are roadmap work.
+- The local-LLM path has been validated with Qwen 2.5 7B on Ollama. Other models are
+  untested.
 - Single process: no HA or federation.
 - The audit chain is not keyed yet.
 - The baseline benchmark has not been run.

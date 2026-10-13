@@ -1,0 +1,9 @@
+{
+  "_comment": "Source of truth for the lab (stands in for Nautobot/NetBox): device -> container, tenant, BGP neighbor -> interface.",
+  "devices": {
+    "lab-r1": {"container": "aos-lab-r1", "tenant": "customer-a", "asn": 65001,
+               "neighbors": {"10.10.0.3": "eth0"}},
+    "lab-r2": {"container": "aos-lab-r2", "tenant": "customer-a", "asn": 65002,
+               "neighbors": {"10.10.0.2": "eth0"}}
+  }
+}

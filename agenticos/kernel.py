@@ -82,7 +82,7 @@ class AgentRuntime:
 
 class Kernel:
     def __init__(self, db_path: str | Path = ":memory:", slots: int = 3,
-                 netsim: NetSim | None = None, log_dir: str | Path | None = None):
+                 netsim: "NetSim | FrrLab | None" = None, log_dir: str | Path | None = None):
         self.store = Store(db_path)
         self.registry = Registry()
         self.delegations = DelegationManager(self.store)
@@ -92,7 +92,10 @@ class Kernel:
         self.memory = Memory(self)
         self.approvals = Approvals(self)
         self.gateway = Gateway(self)
-        net_drivers.register(self.registry, self.netsim)
+        if hasattr(self.netsim, "register"):      # real backends (e.g. FrrLab) bring their drivers
+            self.netsim.register(self.registry)
+        else:
+            net_drivers.register(self.registry, self.netsim)
         model_drivers.register(self.registry)
         services.register(self)
         self.principals: dict[str, dict] = {}

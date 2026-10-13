@@ -69,8 +69,10 @@ Three specialist reviews ran against v0.1-rc. Each confirmed finding became a re
   process isolation (recorded as `isolation="process"`) unless `AOS_REQUIRE_SANDBOX` is set.
 - **IPC/approval waits in the deadlock wait-for graph.** Lock leases have no fencing tokens.
 - **TrustDecision and CapabilityQuery objects.** No federation, cross-region scheduling or HA.
-- **Real FRR/Containerlab drivers (vExpertAI Phase 3).** The local-LLM provider exists but is
-  untested against a live server.
+- **Multi-vendor drivers.** An FRR (vtysh) driver is validated in a 2-router Docker lab
+  (`labs/frr-bgp`). Cisco/Juniper/Arista drivers and an emulated (non rule-based) twin remain.
+  The local-LLM provider is validated with Qwen 2.5 7B on Ollama, with schema-checked output
+  and fallback.
 - **Comparative benchmark against a plain LangGraph implementation (vExpertAI §9).** Not done.
   It is the experiment that decides whether the OS abstraction pays for itself.
 

@@ -27,6 +27,7 @@ class Provider:
     reliability: float = 0.95
     latency: float = 0.2   # normalized penalty, 0 = instant
     cost: float = 0.1      # normalized penalty
+    timeout_s: float = 30.0
 
 
 @dataclass

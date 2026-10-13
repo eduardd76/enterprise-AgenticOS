@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 
@@ -49,10 +50,45 @@ def _printer(t0: float):
     return on_event
 
 
-async def demo(db: str, interactive: bool, policy: str | None = None) -> int:
+LAB_INVENTORY = Path(__file__).resolve().parent.parent / "labs" / "frr-bgp" / "inventory.json"
+
+
+def _ollama_ready(url: str, model: str) -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{url}/v1/models", timeout=3) as r:
+            return any(m["id"] == model for m in json.loads(r.read())["data"])
+    except Exception:
+        return False
+
+
+async def demo(db: str, interactive: bool, policy: str | None = None, lab: bool = False,
+               model: str | None = None) -> int:
     Path(db).unlink(missing_ok=True)
-    k = Kernel(db, slots=3, log_dir=Path(db).parent / "logs")
+    if lab:
+        from .drivers.frr import FrrLab
+        network = FrrLab(LAB_INVENTORY)
+        device, neighbor, iface = "lab-r1", "10.10.0.3", "eth0"
+        try:
+            network.neighbor(device, neighbor)
+        except Exception as e:
+            print(f"FRR lab not reachable ({e}).\nStart it with: labs/frr-bgp/lab.sh up")
+            return 2
+        url = os.environ.get("AOS_MODEL_URL", "http://localhost:11434")
+        if model and _ollama_ready(url, model):
+            os.environ.update(AOS_MODEL_URL=url, AOS_MODEL_NAME=model)
+            print(f"Local model: {model} via {url} (on-prem; evidence never leaves this machine)")
+        else:
+            os.environ.pop("AOS_MODEL_URL", None)
+            print("Local model: not used (pass --model and run Ollama); using scripted reasoner")
+    else:
+        network, device, neighbor, iface = None, "router-edge-01", "192.0.2.1", "Gi0/0/0/1"
+    k = Kernel(db, slots=3, log_dir=Path(db).parent / "logs", netsim=network)
     setup_principals(k)
+    k.add_principal("alice", "customer-a", ["noc-operator"], Grant(
+        capabilities=["*"], targets=["router-edge-*", "router-core-*", "lab-*"],
+        memory_paths=[TENANT_A], production_write=True, budget_calls=500,
+        budget_tokens=100_000, ttl_s=3600))
     if policy:
         for tenant, version in k.load_policy_file(policy).items():
             print(f"confidence policy {version} applied to {tenant}")
@@ -77,7 +113,8 @@ async def demo(db: str, interactive: bool, policy: str | None = None) -> int:
         print(_c("1", f"\n  ┌─ APPROVAL REQUIRED {aid} ── {pkg['op']} on {pkg['target']}"))
         print(f"  │ rationale : {pkg['rationale']}")
         print(f"  │ change    : {pkg['change']}   rollback: {pkg['rollback']}")
-        print(f"  │ twin      : {pkg['predicted']}")
+        print(f"  │ commands  : {' ; '.join(x.lstrip('+- ') for x in pkg['diff'])}")
+        print(f"  │ twin      : {pkg['predicted']}  (computed by the kernel, not the agent)")
         print(f"  │ confidence: {pkg['confidence']['aggregate']} -> {pkg['confidence']['decision']}")
         print(f"  │ evidence  : {', '.join(pkg['evidence_refs'])}")
 
@@ -91,22 +128,32 @@ async def demo(db: str, interactive: bool, policy: str | None = None) -> int:
         asyncio.get_running_loop().call_later(0.3, decide)
     k.approval_handler = on_approval
 
-    print(_c("1", "\n== AOS Kernel v0.1 — AI NOC demo =="))
-    k.netsim.inject("interface_shutdown", "router-edge-01", interface="Gi0/0/0/1")
-    n = k.netsim.devices["router-edge-01"]["bgp"]["192.0.2.1"]
-    print(f"Fault injected: router-edge-01 BGP 192.0.2.1 is {_c('31', n['state'])}"
-          f" ({n['last_reset']})\n")
+    title = "REAL FRR routers" if lab else "simulated network"
+    print(_c("1", f"\n== Enterprise AgenticOS — AI NOC demo on {title} =="))
+    if lab:
+        print("Before:\n" + _bgp_summary(network, device))
+        network.inject_interface_shutdown(device, iface)        # a real fault on a real router
+        for _ in range(20):
+            if network.neighbor(device, neighbor)["state"] != "Established":
+                break
+            await asyncio.sleep(0.5)
+        n = network.neighbor(device, neighbor)
+        print("Fault injected (vtysh: interface eth0 / shutdown):\n" + _bgp_summary(network, device))
+    else:
+        k.netsim.inject("interface_shutdown", device, interface=iface)
+        n = k.netsim.devices[device]["bgp"][neighbor]
+    print(f"{device} BGP {neighbor} is {_c('31', n['state'])} ({n['last_reset']})\n")
 
     intent, coord = k.submit_intent(
-        "alice", "Restore BGP session 192.0.2.1 on router-edge-01", "noc.coordinator",
+        "alice", f"Restore BGP session {neighbor} on {device}", "noc.coordinator",
         Grant(capabilities=["agent.spawn", "checkpoint.*", "ipc.*", "memory.*", "network.*",
                             "twin.simulate", "model.infer", "confidence.evaluate",
                             "approval.request"],
-              targets=["router-edge-01"], memory_paths=[TENANT_A], production_write=True,
-              budget_calls=150, budget_tokens=20_000, ttl_s=600),
-        priority="critical", deadline_s=300,
-        params={"device": "router-edge-01", "neighbor": "192.0.2.1", "incident_id": "INC-4821"})
-    state = await k.wait(coord, 120)
+              targets=[device], memory_paths=[TENANT_A], production_write=True,
+              budget_calls=150, budget_tokens=20_000, ttl_s=900),
+        priority="critical", deadline_s=600,
+        params={"device": device, "neighbor": neighbor, "incident_id": "INC-4821"})
+    state = await k.wait(coord, 600 if lab else 120)
     result = json.loads(k.agent(coord)["result"] or "{}")
 
     # A tenant-b agent probes tenant-a's incident report: must be denied.
@@ -116,19 +163,24 @@ async def demo(db: str, interactive: bool, policy: str | None = None) -> int:
         budget_tokens=0),
         params={"checkpoint_each": False, "script": [
             {"op": "memory.read", "target": "/aos/tenants/customer-a/incidents/INC-4821"},
-            {"op": "network.bgp.inspect", "target": "router-edge-01",
-             "args": {"neighbor": "192.0.2.1"}}]})
+            {"op": "network.bgp.inspect", "target": device,
+             "args": {"neighbor": neighbor}}]})
     await k.wait(probe, 30)
     probe_res = json.loads(k.agent(probe)["result"])["results"]
 
     diag = k.store.one("SELECT agent_id, result FROM agents WHERE agent_type='noc.bgp_diag'")
     diag_res = json.loads(diag["result"] or "{}")
     ok_chain, n_rec, msg = k.store.verify_audit()
-    after = k.netsim.devices["router-edge-01"]["bgp"]["192.0.2.1"]["state"]
+    after = (network.neighbor(device, neighbor)["state"] if lab
+             else k.netsim.devices[device]["bgp"][neighbor]["state"])
 
     print(_c("1", "\n== Outcome =="))
     print(f"  coordinator {coord}: {state} — {result.get('outcome')}  (report {result.get('report_ref')})")
-    print(f"  BGP 192.0.2.1 now: {_c('32' if after == 'Established' else '31', after)}")
+    print(f"  BGP {neighbor} now: {_c('32' if after == 'Established' else '31', after)}")
+    print(f"  diagnosis reasoned by: {diag_res.get('model_provider')}"
+          f" -> {diag_res.get('selected')} ({diag_res.get('claim')})")
+    if lab:
+        print("After:\n" + _bgp_summary(network, device))
     print(_c("1", "\n== What the kernel proved =="))
     checks = [
         ("Model-suggested production write by diagnosis agent denied",
@@ -154,6 +206,11 @@ async def demo(db: str, interactive: bool, policy: str | None = None) -> int:
           f" --lineage del-0001")
     await k.shutdown()
     return 0 if all(ok for _, ok, _ in checks) else 1
+
+
+def _bgp_summary(network, device: str) -> str:
+    out = network._vtysh(device, "show bgp summary")
+    return "\n".join("    " + x for x in out.splitlines() if x.startswith(("Neighbor", "10.")))
 
 
 async def lifecycle(db: str) -> int:
@@ -227,9 +284,12 @@ def main() -> None:
     ap.add_argument("--interactive", action="store_true")
     ap.add_argument("--lineage")
     ap.add_argument("--policy", help="JSON policy file (see examples/policy.json)")
+    ap.add_argument("--lab", action="store_true",
+                    help="run against the real FRR routers (labs/frr-bgp/lab.sh up)")
+    ap.add_argument("--model", help="local Ollama model for diagnosis, e.g. qwen2.5:7b-instruct")
     a = ap.parse_args()
     if a.command == "demo":
-        raise SystemExit(asyncio.run(demo(a.db, a.interactive, a.policy)))
+        raise SystemExit(asyncio.run(demo(a.db, a.interactive, a.policy, a.lab, a.model)))
     if a.command == "lifecycle":
         raise SystemExit(asyncio.run(lifecycle(a.db)))
     if a.command == "ps":

@@ -94,7 +94,7 @@ class Gateway:
             result, used, failures = None, None, []
             for p in providers:
                 try:
-                    timeout = None if p.id == "kernel" else PROVIDER_TIMEOUT_S
+                    timeout = None if p.id == "kernel" else p.timeout_s
                     result = await asyncio.wait_for(p.fn(ctx, target, args), timeout)
                     used, invoked = p.id, True
                     break
