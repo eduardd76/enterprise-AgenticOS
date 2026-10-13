@@ -71,3 +71,44 @@ def test_live_lab_fault_is_fixed_once_through_the_kernel(tmp_path):
         ["docker", "exec", "aos-lab-r1", "vtysh", "-c", "show bgp neighbors 10.10.0.3 json"],
         capture_output=True, text=True).stdout)["10.10.0.3"]["bgpState"]
     assert st == "Established"
+
+
+@pytest.mark.skipif(not _lab_up(), reason="set AOS_LAB=1 with labs/frr-bgp/lab.sh up")
+def test_live_watch_opens_one_incident_waits_for_human_and_cleans_up(tmp_path):
+    """Event-driven mode: real fault -> one incident -> approval from a *separate process*
+    -> fixed -> every agent process exits."""
+    import sys
+    import time
+    db = str(tmp_path / "watch.db")
+    os.environ.pop("AOS_MODEL_URL", None)
+    w = subprocess.Popen([sys.executable, "-m", "agenticos", "watch", "--once", "--interval", "1",
+                          "--db", db], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        time.sleep(4)
+        subprocess.run(["docker", "exec", "aos-lab-r1", "vtysh", "-c", "conf t", "-c",
+                        "interface eth0", "-c", "shutdown"], check=True)
+        cli = [sys.executable, "-m", "agenticos"]
+        for _ in range(60):
+            out = subprocess.run(cli + ["approvals", "--db", db], capture_output=True,
+                                 text=True).stdout
+            if "apr-" in out:
+                break
+            time.sleep(1)
+        assert "network.config.apply on lab-r1" in out
+        # a non-approver (the system monitor itself) is refused
+        r = subprocess.run(cli + ["approve", "apr-0001", "--as", "noc-monitor", "--db", db],
+                           capture_output=True, text=True)
+        assert r.returncode == 1
+        subprocess.run(cli + ["approve", "apr-0001", "--as", "bob", "--db", db], check=True)
+        log = w.communicate(timeout=120)[0]
+    finally:
+        if w.poll() is None:
+            w.kill()
+    assert w.returncode == 0, log
+    assert log.count("ALERT") == 1                      # one outage -> one incident
+    assert "INC-0001 closed: COMPLETED" in log
+    assert "agent processes still running: 0" in log
+    st = json.loads(subprocess.run(
+        ["docker", "exec", "aos-lab-r1", "vtysh", "-c", "show bgp neighbors 10.10.0.3 json"],
+        capture_output=True, text=True).stdout)["10.10.0.3"]["bgpState"]
+    assert st == "Established"

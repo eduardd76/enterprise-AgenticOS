@@ -120,7 +120,11 @@ python3 -m agenticos demo --lab --model qwen2.5:7b-instruct     # local model vi
 ```
 
 This runs a real outage on real FRR routers in Docker, diagnosed by a local LLM, and fixed
-through the kernel with approval, exactly-once execution and verification. See
+through the kernel with approval, exactly-once execution and verification.
+
+**Always-on mode:** `python3 -m agenticos watch` monitors the routers and opens an incident by
+itself when a BGP link breaks. Agents start, ask a human to approve
+(`agenticos approve apr-0001 --as bob` from another terminal), fix, verify and exit. See
 [labs/frr-bgp](labs/frr-bgp/README.md).
 
 Sandboxing is automatic on macOS (`sandbox-exec`) and on Linux with `bubblewrap` installed.

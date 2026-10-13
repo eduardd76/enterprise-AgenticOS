@@ -5,6 +5,10 @@
   lifecycle   Phase-1 exit test: start, suspend, resume and cancel an agent.
   ps          List agents and their states.
   audit       Verify the hash chain; --lineage DEL shows everything done under a delegation.
+  watch       Watch the FRR lab; open an incident when a BGP link breaks; agents fix it
+              (with human approval) and exit; keep watching.
+  approve     Decide a pending approval from another terminal: approve apr-0001 --as bob
+  approvals   List pending approvals.
 """
 
 from __future__ import annotations
@@ -279,7 +283,15 @@ def audit(db: str, lineage: str | None) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(prog="agenticos", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["demo", "lifecycle", "ps", "audit"])
+    ap.add_argument("command", choices=["demo", "lifecycle", "ps", "audit", "watch",
+                                        "approve", "approvals"])
+    ap.add_argument("approval_id", nargs="?", help="for `approve`: e.g. apr-0001")
+    ap.add_argument("--as", dest="principal", default="bob", help="approver (approve)")
+    ap.add_argument("--deny", action="store_true", help="deny instead of approve")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--interval", type=float, default=3.0, help="watch poll interval (s)")
+    ap.add_argument("--once", action="store_true", help="watch: exit after first incident")
+    ap.add_argument("--approval-timeout", type=int, default=600)
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--interactive", action="store_true")
     ap.add_argument("--lineage")
@@ -292,6 +304,17 @@ def main() -> None:
         raise SystemExit(asyncio.run(demo(a.db, a.interactive, a.policy, a.lab, a.model)))
     if a.command == "lifecycle":
         raise SystemExit(asyncio.run(lifecycle(a.db)))
+    if a.command in ("watch", "approve", "approvals"):
+        from . import watch as w
+        db = a.db if a.db != DEFAULT_DB else "var/watch.db"
+        if a.command == "watch":
+            raise SystemExit(asyncio.run(w.watch(db, a.model, a.interval, a.once,
+                                                 a.approval_timeout)))
+        if a.command == "approvals":
+            raise SystemExit(w.pending(db))
+        if not a.approval_id:
+            ap.error("approve needs an approval id, e.g. apr-0001")
+        raise SystemExit(w.approve(db, a.approval_id, a.principal, a.deny, a.note))
     if a.command == "ps":
         raise SystemExit(ps(a.db))
     raise SystemExit(audit(a.db, a.lineage))

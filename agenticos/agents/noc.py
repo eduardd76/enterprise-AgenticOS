@@ -44,6 +44,7 @@ class Coordinator(Agent):
             s.checkpoint(st)
 
         selected = st["diagnosis"]["selected"]
+        approval_wait = int(self.params.get("approval_timeout_s", 120))
         if st["stage"] == "diagnosed":
             if not selected.get("remediation") or \
                     st["diagnosis"]["confidence_decision"] not in ("PROCEED", "PROCEED_WITH_WARNING"):
@@ -53,7 +54,8 @@ class Coordinator(Agent):
                                         "twin.simulate", "confidence.evaluate",
                                         "approval.request", "network.config.apply"],
                 "targets": [dev], "production_write": True,
-                "budget_calls": 20, "budget_tokens": 1000, "ttl_s": 180})["result"]["agent_id"]
+                "budget_calls": 20, "budget_tokens": 1000, "ttl_s": approval_wait + 180},
+                params={"approval_timeout_s": approval_wait})["result"]["agent_id"]
             st.update(stage="spawned_change", change_agent=change)
             s.checkpoint(st)
         if st["stage"] == "spawned_change":
@@ -65,7 +67,7 @@ class Coordinator(Agent):
             st["stage"] = "remediating"
             s.checkpoint(st)
         if st["stage"] == "remediating":
-            m = self._await("REMEDIATION_RESULT", 180)
+            m = self._await("REMEDIATION_RESULT", approval_wait + 180)
             st.update(stage="remediated", remediation=m["payload"])
             s.checkpoint(st)
             if not m["payload"].get("applied"):
@@ -206,7 +208,8 @@ class ChangeAgent(Agent):
             a = s.call("approval.request", dev, op="network.config.apply", change=change,
                        confidence_ref=st["confidence_ref"], rationale=req["hypothesis"]["claim"],
                        rollback=rollback, predicted=twin["predicted"], diff=st["diff"],
-                       evidence_refs=m["evidence_refs"], timeout_s=120)["result"]
+                       evidence_refs=m["evidence_refs"],
+                       timeout_s=int(self.params.get("approval_timeout_s", 120)))["result"]
             st["approval_id"] = a["approval_id"]
             s.checkpoint(st)
         r = s.call("network.config.apply", dev, change=change, approval_id=st["approval_id"],

@@ -23,7 +23,35 @@ labs/frr-bgp/lab.sh down
 Without `--model`, or if Ollama isn't running, diagnosis uses the deterministic scripted
 reasoner. Everything else is identical.
 
-## What happens
+## Always-on: the watcher
+
+```bash
+# terminal 1: watch the network; incidents open by themselves
+python3 -m agenticos watch --model qwen2.5:7b-instruct
+
+# anywhere: break something
+docker exec aos-lab-r1 vtysh -c "conf t" -c "interface eth0" -c "shutdown"
+
+# terminal 2: the on-call engineer sees the approval request and decides
+python3 -m agenticos approvals
+python3 -m agenticos approve apr-0001 --as bob        # or --deny
+```
+
+The watcher isn't an AI. It's a cheap, deterministic poller of BGP state. When a link
+breaks:
+
+1. It correlates both ends into **one incident** (not two) and assigns it to the router
+   whose own interface is down.
+2. It opens an intent as the system principal `noc-monitor`, and the agents start.
+3. The agents diagnose the fault, test the fix on the twin, and wait for a **human**
+   approval. The monitor itself is refused as an approver.
+4. They fix, verify, write the report, and **every agent process exits**. The watcher
+   prints "agent processes still running: 0" and goes back to watching.
+
+Flapping links are debounced. If a link is still down after its incident closes, the
+watcher reports that a human is needed and doesn't retry in a loop.
+
+## What happens (one-shot demo)
 
 1. A **real fault**: `interface eth0 / shutdown` on lab-r1. BGP drops to Idle/Active.
 2. The diagnosis agent reads the **real** BGP and interface state through the kernel. Only the

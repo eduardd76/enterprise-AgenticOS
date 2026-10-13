@@ -183,12 +183,22 @@ class Approvals:
         return aid
 
     async def wait(self, aid: str, timeout_s: float) -> str:
-        try:
-            await asyncio.wait_for(self._decided[aid].wait(), timeout_s)
-        except asyncio.TimeoutError:
-            self.k.store.exec("UPDATE approvals SET status='expired' WHERE approval_id=? AND "
-                              "status='pending'", (aid,))
-            self.k.store.audit("approval.expired", approval_id=aid)
+        """Wake on an in-process decision, or notice one written by another process
+        (e.g. `agenticos approve` in a second terminal) by polling the durable record."""
+        end = time.time() + timeout_s
+        status = "pending"
+        while time.time() < end:
+            try:
+                await asyncio.wait_for(self._decided[aid].wait(), min(1.0, end - time.time()))
+            except asyncio.TimeoutError:
+                pass
+            status = self.k.store.one("SELECT status FROM approvals WHERE approval_id=?",
+                                      (aid,))["status"]
+            if status != "pending":
+                return status
+        self.k.store.exec("UPDATE approvals SET status='expired' WHERE approval_id=? AND "
+                          "status='pending'", (aid,))
+        self.k.store.audit("approval.expired", approval_id=aid)
         return self.k.store.one("SELECT status FROM approvals WHERE approval_id=?", (aid,))["status"]
 
     def decide(self, aid: str, principal: str, approve: bool, note: str = "") -> None:
@@ -353,13 +363,16 @@ def register(kernel: "Kernel") -> None:
                       budget_tokens=g.get("budget_tokens", 5000),
                       ttl_s=g.get("ttl_s", 300))    # non-finite/negative -> expired (_ttl)
         role = _opt_str(args.get("role", target), 64) or target
+        params = args.get("params", {})
+        if not isinstance(params, dict) or len(json.dumps(params, default=str)) > 8192:
+            raise SyscallError("INVALID_REQUEST", "params must be an object under 8 KiB")
         child_id = k.new_agent_id(target)
         did = k.delegations.attenuate(ctx.agent["delegation_id"], child_id, grant)
         k.create_agent(child_id, target, tenant=ctx.agent["tenant"], owner=ctx.agent["owner"],
                        role=role, intent_id=ctx.agent["intent_id"],
                        delegation_id=did, parent_agent=ctx.agent["agent_id"],
                        priority=_clamp_priority(args.get("priority"), ctx.agent["priority"]),
-                       deadline=ctx.agent["deadline"])
+                       deadline=ctx.agent["deadline"], params=params)
         return {"agent_id": child_id, "delegation_id": did}
 
     async def confidence_evaluate(ctx: CallContext, target: str, args: dict) -> dict:
