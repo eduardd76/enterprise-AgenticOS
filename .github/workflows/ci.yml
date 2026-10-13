@@ -60,7 +60,13 @@ jobs:
           python -m agenticos demo --lab --db var/lab.db
       - name: Independent check (plain vtysh, not AgenticOS)
         run: |
-          docker exec aos-lab-r2 vtysh -c "show ip bgp" | tee /dev/stderr | grep -q "192.0.2.0/24"
+          for i in $(seq 1 20); do
+            docker exec aos-lab-r2 vtysh -c "show ip bgp" | grep -q "192.0.2.0/24" && \
+              docker exec aos-lab-r1 vtysh -c "show ip bgp" | grep -q "198.51.100.0/24" && break
+            [ "$i" = 20 ] && { docker exec aos-lab-r2 vtysh -c "show ip bgp"; exit 1; }
+            sleep 1
+          done
+          docker exec aos-lab-r2 vtysh -c "show ip bgp"
       - name: Diagnostics on failure
         if: failure()
         run: |

@@ -73,7 +73,9 @@ class FrrLab:
         return {"neighbor": ip, "state": n.get("bgpState"), "remote_as": n.get("remoteAs"),
                 "interface": iface,
                 "hold_time": int(n.get("bgpTimerConfiguredHoldTimeMsecs", 0)) // 1000,
-                "last_reset": n.get("lastResetDueTo")}
+                "last_reset": n.get("lastResetDueTo"),
+                "prefixes_received": n.get("addressFamilyInfo", {}).get("ipv4Unicast", {})
+                                      .get("acceptedPrefixCounter")}
 
     def interface(self, device: str, name: str) -> dict:
         i = self._json(device, f"show interface {name} json").get(name, {})

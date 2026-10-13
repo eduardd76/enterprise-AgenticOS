@@ -226,13 +226,19 @@ class Verifier(Agent):
         s = self.sys
         m = s.recv(timeout_s=60, type="VERIFY_REQUEST")
         dev, nbr = m["payload"]["device"], m["payload"]["neighbor"]
-        # Real protocols converge over seconds: poll, then judge.
+        # Real protocols converge over seconds: poll, then judge. "Healthy" means the session
+        # is up AND routes are flowing again, not merely that the TCP session re-formed.
+        def healthy(res: dict) -> bool:
+            pfx = res.get("prefixes_received")
+            return res["state"] == "Established" and (pfx is None or pfx > 0)
+
         for attempt in range(30):
             r = s.call("network.bgp.inspect", dev, neighbor=nbr)
-            if r["result"]["state"] == "Established":
+            if healthy(r["result"]):
                 break
             time.sleep(1)
-        payload = {"healthy": r["result"]["state"] == "Established", "state": r["result"]["state"],
+        payload = {"healthy": healthy(r["result"]), "state": r["result"]["state"],
+                   "prefixes_received": r["result"].get("prefixes_received"),
                    "polls": attempt + 1, "evidence_ref": r["evidence_ref"]}
         s.send(m["source"], "VERIFY_RESULT", payload, correlation_id=m["correlation_id"],
                message_id=f"{m['correlation_id']}-verify-result")
