@@ -76,3 +76,26 @@ jobs:
       - name: Tear down
         if: always()
         run: labs/frr-bgp/lab.sh down
+
+  # The pilot integrations, live: NetBox as the source of truth (seeded from the EVPN lab
+  # files) and Batfish predicting the two-fault fabric from the lab's configs. No cEOS needed:
+  # both work from the configs and the inventory.
+  integrations:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[dev,batfish]'
+      - name: Start Batfish
+        run: |
+          docker run -d --name batfish -p 127.0.0.1:9996:9996 batfish/allinone
+          for i in $(seq 1 60); do nc -z 127.0.0.1 9996 && break; sleep 2; done
+      - name: Start and seed NetBox
+        run: labs/evpn-ceos/netbox/netbox.sh up
+      - name: Live NetBox + Batfish tests
+        run: |
+          set -a; . var/netbox.env; set +a
+          AOS_NETBOX=1 AOS_BATFISH=1 python -m pytest -q -rs \
+            tests/test_netbox_sot.py tests/test_batfish_twin.py

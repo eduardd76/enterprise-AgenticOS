@@ -180,19 +180,22 @@ async def watch(db: str, model: str | None = None, interval: float = 3.0, once: 
         await k.shutdown()
 
 
-async def _post_safe(slack, k, aid: str, pkg: dict) -> None:
+async def _post_safe(channel, k, aid: str, pkg: dict, label: str = "slack") -> None:
     """HTTP in a worker thread; audit writes back on the kernel thread (SQLite affinity)."""
     try:
-        await asyncio.to_thread(slack.post, aid, pkg)
-        k.store.audit("approval.posted", approval_id=aid, channel="slack", to=slack.channel)
-    except Exception as e:                       # CLI approval still works if Slack is down
-        k.store.audit("approval.channel_error", approval_id=aid, channel="slack",
+        ref = await asyncio.to_thread(channel.post, aid, pkg)
+        k.store.audit("approval.posted", approval_id=aid, channel=label,
+                      to=getattr(channel, "channel", None) or ref)
+        if label == "servicenow":
+            print(f"  → {aid} raised as ServiceNow change {ref}: approve or reject it there")
+    except Exception as e:                       # CLI approval still works if the channel is down
+        k.store.audit("approval.channel_error", approval_id=aid, channel=label,
                       error=str(e)[:200])
         hint = ""
         if "CERTIFICATE_VERIFY_FAILED" in str(e):
             hint = ("\n    Python has no CA certificates. On macOS run: "
                     "\"/Applications/Python 3.12/Install Certificates.command\"")
-        print(f"  ! Slack post failed for {aid} ({e}); approve via CLI instead{hint}")
+        print(f"  ! {label} post failed for {aid} ({e}); approve via CLI instead{hint}")
 
 
 def approve(db: str, approval_id: str, principal: str, deny: bool, note: str) -> int:

@@ -1,0 +1,71 @@
+# Lab NetBox (source of truth for the EVPN fabric). Lean on purpose — the cEOS lab already
+# uses ~9 GB: no rq worker / housekeeping containers, one valkey for queue + cache, small
+# postgres. Lab-only credentials; the API listens on 127.0.0.1 only. Use ./netbox.sh up.
+name: aos-netbox
+
+x-netbox-env: &netbox-env
+  DB_HOST: postgres
+  DB_NAME: netbox
+  DB_USER: netbox
+  DB_PASSWORD: netbox-lab-only
+  REDIS_HOST: valkey
+  REDIS_DATABASE: "0"
+  REDIS_PASSWORD: ""
+  REDIS_CACHE_HOST: valkey
+  REDIS_CACHE_DATABASE: "1"
+  REDIS_CACHE_PASSWORD: ""
+  SECRET_KEY: ${NETBOX_SECRET_KEY:?run netbox.sh, which generates it}
+  ALLOWED_HOSTS: "*"
+  SKIP_SUPERUSER: "false"
+  SUPERUSER_NAME: admin
+  SUPERUSER_EMAIL: admin@example.com
+  SUPERUSER_PASSWORD: admin
+  SUPERUSER_API_TOKEN: ${NETBOX_TOKEN:?run netbox.sh, which generates it}
+  METRICS_ENABLED: "false"
+  GRAPHQL_ENABLED: "false"
+  WEBHOOKS_ENABLED: "false"
+  RELEASE_CHECK_URL: ""
+
+services:
+  netbox:  # NetBox 4.3.7 (netbox-docker 3.3.0): v1 API tokens, "Authorization: Token <key>"
+    image: netboxcommunity/netbox:v4.3-3.3.0
+    depends_on:
+      postgres: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+    environment: *netbox-env
+    ports: ["127.0.0.1:8000:8080"]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/login/ >/dev/null || exit 1"]
+      start_period: 300s
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+      POSTGRES_PASSWORD: netbox-lab-only
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=40"]
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U netbox -d netbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb"]
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pg-data:

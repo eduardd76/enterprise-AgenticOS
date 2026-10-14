@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "enterprise-agenticos"
 version = "0.1.0"
-description = "A minimal, deterministic operating-system kernel for governing AI agents (AOS-0001 implementation)"
+description = "AI change control for network operations: a deterministic kernel that governs AI agents (AOS-0001 implementation)"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
@@ -20,6 +20,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+batfish = ["pybatfish>=2025.7"]
 
 [project.scripts]
 agenticos = "agenticos.cli:main"

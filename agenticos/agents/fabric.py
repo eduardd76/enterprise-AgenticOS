@@ -38,7 +38,8 @@ class FabricCoordinator(Agent):
                     "budget_tokens": 20_000, "ttl_s": 600},
                     params={"devices": p["devices"]})["result"]["agent_id"]
                 s.send(diag, "FABRIC_DIAGNOSIS_REQUEST",
-                       {"devices": p["devices"], "history": st["history"]},
+                       {"devices": p["devices"], "history": st["history"],
+                        "carry": st.get("carry", [])},
                        correlation_id=tag, message_id=f"{tag}-diag-req")
                 st["stage"] = "diagnosing"
                 s.checkpoint(st)
@@ -54,6 +55,9 @@ class FabricCoordinator(Agent):
                 if not fix or d["confidence_decision"] not in ("PROCEED", "PROCEED_WITH_WARNING"):
                     return self._report(st, "escalated to human: no verified automated fix "
                                             f"(round {r})")
+                # Verified-but-unused hypotheses go to the next round, where they must pass the
+                # evidence check again: a model that forgets a fault can't drop a known fix.
+                st["carry"] = [h for h in d.get("verified", []) if h["id"] != fix["id"]]
                 rem = dict(fix["remediation"])
                 device = rem.pop("device")
                 change = s.call("agent.spawn", "fabric.change", role=f"change-round-{r}", grant={
@@ -159,7 +163,10 @@ class FabricDiagnostic(Agent):
                 st["overreach"] = e.code
             s.checkpoint(st)
         # Deterministic check: a hypothesis only counts if the evidence shows that fault.
-        hyps = sorted(st["model"]["hypotheses"], key=lambda h: -h["likelihood"])
+        seen = {str(h.get("remediation")) for h in st["model"]["hypotheses"]}
+        carried = [{**h, "id": f"carried-{h['id']}", "claim": f"{h['claim']} (carried over)"}
+                   for h in req.get("carry", []) if str(h.get("remediation")) not in seen]
+        hyps = sorted(st["model"]["hypotheses"] + carried, key=lambda h: -h["likelihood"])
         done = {(h["device"], h["interface"]) for h in req["history"]}
         verified = [h for h in hyps if h.get("remediation") and self._verify(h["remediation"],
                                                                             st["devices"], done)]
@@ -172,7 +179,7 @@ class FabricDiagnostic(Agent):
                                "temporal": 0.95})["result"]
         return self._reply(st, tag, {
             "healthy": False, "probe": st["probe"], "hypotheses": hyps, "selected": best,
-            "verified_count": len(verified), "confidence_ref": c["confidence_id"],
+            "verified_count": len(verified), "verified": verified, "confidence_ref": c["confidence_id"],
             "confidence": c["aggregate"], "confidence_decision": c["decision"],
             "model_provider": st["provider"], "model_overreach": st.get("overreach")})
 
@@ -187,8 +194,9 @@ class FabricDiagnostic(Agent):
         if "admin" in rem:
             return rem["admin"] == "up" and iface["admin"] == "down"
         if "access_vlan" in rem:
-            return rem["interface"] in dev["host_ports"] and rem["access_vlan"] == 10 \
-                and iface["vlan"] != 10
+            want = dev.get("intended_vlans", {}).get(rem["interface"], 10)
+            return rem["interface"] in dev["host_ports"] and rem["access_vlan"] == want \
+                and iface["vlan"] != want
         return False
 
     def _reply(self, st: dict, tag: str, payload: dict) -> dict:

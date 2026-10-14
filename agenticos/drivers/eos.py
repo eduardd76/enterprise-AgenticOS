@@ -6,10 +6,17 @@ of two change shapes, each bound to one device:
     {"interface": "EthernetN", "admin": "up"|"down"}
     {"interface": "EthernetN", "access_vlan": <vlan in inventory>}   (host ports only)
 
-The twin is a rule-based model of the fabric's *health elements* (leaf uplinks, host-port
-VLAN membership, the tenant service). It predicts per-element effects, so a change that fixes
-one fault while another remains shows "improves X, service still unreachable" — honest
-about multi-fault incidents. It is not an emulated clone of EOS.
+Two twins predict a change's per-element effects, so a change that fixes one fault while
+another remains shows "improves X, service still unreachable" (honest about multi-fault
+incidents):
+  - rules (default): a hand-written model of the lab's health elements (leaf uplinks,
+    host-port VLANs, the VNI binding). Fast and dependency-free; it knows only those facts.
+  - batfish: the switches' real running-configs, with the change written in, analysed by
+    Batfish (drivers/batfish.py). Use this one for anything beyond the demo.
+
+The inventory (source of truth) is a JSON file or a dict, e.g. loaded from NetBox
+(sot/netbox.py). `intended_vlans` per leaf, when present, is the intent fixes are checked
+against; otherwise the service VLAN is.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from pathlib import Path
 from ..errors import SyscallError
 from ..registry import CallContext, Capability, Provider, Registry
 from ..store import sha256
+from .batfish import candidate_config, healthy, interface_settings
 
 CLI_TIMEOUT_S = 60
 SHOW = ["show interfaces status", "show ip bgp summary", "show bgp evpn summary",
@@ -46,12 +54,22 @@ def _peers(doc: dict) -> dict:
 
 
 class EosLab:
-    def __init__(self, inventory_path: str | Path):
-        inv = json.loads(Path(inventory_path).read_text())
+    def __init__(self, inventory: str | Path | dict, twin: str = "rules",
+                 batfish_host: str = "127.0.0.1"):
+        inv = inventory if isinstance(inventory, dict) else json.loads(Path(inventory).read_text())
         self.service, self.vlans = inv["service"], {int(k): v for k, v in inv["vlans"].items()}
         self.devices, self.hosts = inv["devices"], inv["hosts"]
         self.inventory = {**self.devices, **self.hosts}     # tenant lookups for any target
         self.apply_count = 0
+        self.twin = None
+        if twin == "batfish":
+            from .batfish import BatfishTwin
+            self.twin = BatfishTwin(inv, host=batfish_host)
+        elif twin != "rules":
+            raise ValueError(f"unknown twin {twin!r} (rules or batfish)")
+
+    def intended_vlan(self, device: str, port: str) -> int:
+        return int(self.devices[device].get("intended_vlans", {}).get(port, self.service["vlan"]))
 
     # -- transport ---------------------------------------------------------
     def _exec(self, container: str, argv: list[str]) -> subprocess.CompletedProcess:
@@ -115,7 +133,9 @@ class EosLab:
                 "remote_vteps": sorted({v for i in vtep.get("interfaces", {}).values()
                                         for v in i.get("vteps", [])}),
                 "mac_table": macs[:20],
-                "host_ports": dev.get("host_ports", {}), "snapshot": self.state_hash(device)[:12]}
+                "host_ports": dev.get("host_ports", {}),
+                "intended_vlans": {p: self.intended_vlan(device, p) for p in dev.get("host_ports", {})},
+                "snapshot": self.state_hash(device)[:12]}
 
     def probe(self, host: str | None = None) -> dict:
         p = self.service["probe"]
@@ -162,7 +182,7 @@ class EosLab:
                 h[f"{leaf}:{u} (uplink)"] = "up" if adm == "up" else "down"
                 ok &= adm == "up"
             for p, vlan in s["host_ports"].items():
-                good = vlan == svc_vlan and s["admin"].get(p) == "up"
+                good = vlan == self.intended_vlan(leaf, p) and s["admin"].get(p) == "up"
                 h[f"{leaf}:{p} ({self.devices[leaf]['host_ports'][p]})"] = \
                     f"vlan {vlan}" + ("" if good else " (wrong)")
                 ok &= good
@@ -171,6 +191,8 @@ class EosLab:
         return h
 
     def simulate(self, device: str, change) -> dict:
+        if self.twin is not None:
+            return self._simulate_batfish(device, change)
         cmds = self.commands(device, change)
         live = self.model()
         twin = copy.deepcopy(live)
@@ -185,15 +207,34 @@ class EosLab:
             rollback = {"interface": iface, "access_vlan": s["host_ports"][iface]}
             s["host_ports"][iface] = change["access_vlan"]
         before, after = self.health(live), self.health(twin)
-        healthy = lambda v: v in ("up", "reachable") or (v.startswith("vlan") and "wrong" not in v)
         return {"before": before, "predicted": after, "rollback": rollback,
                 "regressions": [k for k in before if healthy(before[k]) and not healthy(after[k])],
                 "improves": [k for k in before if not healthy(before[k]) and healthy(after[k])],
                 "diff": [f"+ {c}" for c in cmds], "twin_kind": "rule-based fabric health model"}
 
+    def _simulate_batfish(self, device: str, change) -> dict:
+        cmds = self.commands(device, change)
+        live = {d: self.running_config(d) for d in self.devices}
+        cand = {**live, device: candidate_config(live[device], change)}
+        before, after = self.twin.evaluate(live), self.twin.evaluate(cand)
+        return {"before": before, "predicted": after,
+                "rollback": self.rollback(device, change, live[device]),
+                "regressions": [k for k in before if healthy(before[k]) and
+                                not healthy(after.get(k, "missing"))],
+                "improves": [k for k in before if not healthy(before[k]) and
+                             healthy(after.get(k, "missing"))],
+                "diff": [f"+ {c}" for c in cmds], "twin_kind": self.twin.kind}
+
+    def rollback(self, device: str, change: dict, cfg: str | None = None) -> dict:
+        """The inverse change, read from the device's current configuration."""
+        cur = interface_settings(cfg if cfg is not None else self.running_config(device),
+                                 change["interface"])
+        key = "admin" if "admin" in change else "access_vlan"
+        return {"interface": change["interface"], key: cur[key]}
+
     def apply(self, device: str, change) -> dict:
         cmds = self.commands(device, change)
-        rollback = self.simulate(device, change)["rollback"]
+        rollback = self.rollback(device, change)
         out = self._cli(device, "\n".join(["configure", *cmds, "end"]))
         if "%" in out:
             raise SyscallError("PROVIDER_ERROR", f"{device}: config rejected: {out.strip()[:200]}")

@@ -45,6 +45,24 @@ Notes on the Qwen run:
   it could be proposed, and the switches were verified independently afterwards with plain
   EOS commands.
 
+### Full pilot stack: NetBox + Batfish + Qwen (real run)
+
+`fabric --model qwen2.5:7b-instruct --sot netbox --twin batfish`: intent read from NetBox,
+every fix predicted by Batfish from the switches' real running-configs.
+
+| Round | Fix (Qwen) | Batfish prediction shown to the approver |
+|---|---|---|
+| 1 | leaf2 Ethernet3 → VLAN 10 ("in VLAN 20 instead of 10") | host2 port fixed; leaf2 underlay + EVPN BGP still **down**, VTEPs unreachable → service **unreachable** |
+| 2 | leaf2 Ethernet1 no shutdown (carried over from round 1) | all BGP sessions up, VTEPs reachable → service **reachable** |
+
+Outcome: resolved, 2 approved changes, host1 → host2 at 0% loss (checked independently
+with EOS CLI), audit chain intact. Qwen again tried to apply fixes itself and was refused.
+
+In an earlier run, Qwen named both faults in round 1 but forgot the uplink in round 2. Since
+then, hypotheses that passed the evidence check but weren't used are carried into the next
+round. They must pass the check again against fresh evidence, so a model's lapse can't drop a
+known-good fix.
+
 ## How AgenticOS handles it: rounds
 
 Each round:
@@ -95,7 +113,11 @@ it by hand.
 - **Local LLM tip:** AgenticOS caps every model call (`AOS_MODEL_MAX_TOKENS`, default 1024).
   Without a cap, JSON-mode generation can loop on whitespace and block Ollama's only slot for
   every later request.
-- **The twin is a rule-based model** of fabric health elements: uplinks, host-port VLANs,
-  VNI bindings. It is not an emulated EOS.
+- **Two twins.** The default is a rule-based model of the fabric's health elements (uplinks,
+  host-port VLANs, VNI bindings). With `--twin batfish`, the change is written into the
+  switches' real running-configs and Batfish computes BGP, EVPN, VLAN, VNI and VTEP-path
+  state. Batfish doesn't forward host traffic over VXLAN, so the verifier still pings.
+- **Source of truth.** `inventory.json`, or NetBox (`--sot netbox`, see `netbox/`), which also
+  supplies the intended VLAN per host port.
 - **Allowed changes** (`EosLab.commands`): interface admin up/down, and host-port access VLAN
   limited to VLANs in the inventory. Everything else is rejected before it reaches EOS.

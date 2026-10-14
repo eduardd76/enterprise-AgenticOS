@@ -166,8 +166,9 @@ class Approvals:
                    "rationale": args.get("rationale"),
                    "rationale_source": "agent-asserted (unverified)",
                    "rollback": twin["rollback"], "predicted": twin["predicted"],
-                   "regressions": twin["regressions"], "diff": twin["diff"],
-                   "twin_source": "kernel digital twin", "evidence_refs": refs,
+                   "regressions": twin["regressions"], "improves": twin.get("improves", []),
+                   "diff": twin["diff"], "twin_source": "kernel digital twin",
+                   "twin_kind": twin.get("twin_kind", "rules"), "evidence_refs": refs,
                    "confidence": json.loads(crow["body"]), "requested_by": agent["agent_id"],
                    "intent_id": agent["intent_id"], "delegation_id": agent["delegation_id"]}
         self.k.store.exec(

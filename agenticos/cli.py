@@ -297,6 +297,14 @@ def main() -> None:
                                             "(token in SLACK_BOT_TOKEN)")
     ap.add_argument("--approvers", help="JSON mapping Slack user ids to principals "
                                         "(see examples/approvers.json)")
+    ap.add_argument("--twin", choices=["rules", "batfish"], default="rules",
+                    help="fabric: how changes are predicted (batfish needs BATFISH_HOST)")
+    ap.add_argument("--sot", choices=["file", "netbox"], default="file",
+                    help="fabric: source of truth (netbox needs NETBOX_URL, NETBOX_TOKEN)")
+    ap.add_argument("--site", default="evpn-dc", help="fabric: NetBox site")
+    ap.add_argument("--servicenow", action="store_true",
+                    help="fabric: raise approvals as ServiceNow change requests "
+                         "(SNOW_INSTANCE + SNOW_USER/SNOW_PASSWORD or SNOW_TOKEN)")
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--interactive", action="store_true")
     ap.add_argument("--lineage")
@@ -312,8 +320,10 @@ def main() -> None:
     if a.command == "fabric":
         from .fabric_cli import fabric
         db = a.db if a.db != DEFAULT_DB else "var/fabric.db"
-        raise SystemExit(asyncio.run(fabric(db, a.model, a.interactive,
-                                            approval_timeout_s=a.approval_timeout)))
+        raise SystemExit(asyncio.run(fabric(
+            db, a.model, a.interactive, approval_timeout_s=a.approval_timeout, twin=a.twin,
+            sot=a.sot, site=a.site, servicenow=a.servicenow, slack_channel=a.slack_channel,
+            approvers_file=a.approvers)))
     if a.command in ("watch", "approve", "approvals"):
         from . import watch as w
         db = a.db if a.db != DEFAULT_DB else "var/watch.db"

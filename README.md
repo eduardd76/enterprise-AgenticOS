@@ -1,89 +1,85 @@
 # Enterprise AgenticOS
 
-**An operating-system kernel for governing AI agents in production infrastructure.**
+**AI change control for network operations.**
 
-LLM agents are good at reasoning and bad at being trusted. Enterprise AgenticOS keeps them
-apart. Agents run as **sandboxed OS processes** with no credentials, no network and no
-filesystem access. Their only channel to the world is a **syscall pipe** into a small,
-deterministic kernel. The kernel owns identity, authority, policy, scheduling, memory,
-evidence and recovery. Models *propose*; the kernel decides what actually happens, and
-records why.
+Let AI diagnose and fix your network, without anyone having to trust the AI.
 
-> **Status: v0.1 design-partner preview.** The architecture works end to end and has been
-> red-teamed, but it is not production-hardened yet. See [SECURITY.md](SECURITY.md) and
-> [CONFORMANCE.md](CONFORMANCE.md). If you operate regulated or sovereign infrastructure and
-> want to shape the roadmap, open a discussion.
+AI agents can now find the cause of a network outage in seconds. Network teams still don't let
+them touch production, and they're right: one bad change can take the business down, and
+nobody can prove afterwards who allowed it. AgenticOS is the control layer between the AI and
+your devices. The AI **proposes**. AgenticOS checks the proposal against live evidence and
+predicts its effect from your real device configurations. Then it raises a change request for
+a named human to approve, applies the change exactly once, verifies it, and keeps a
+tamper-evident record of all of it.
 
-## How it helps enterprises
+> **Status: v0.1 design-partner preview.** It has been validated live on Arista cEOS and FRR,
+> with a local LLM, NetBox, Batfish and Slack, and red-teamed. It is not production-hardened
+> yet. See [SECURITY.md](SECURITY.md) and [CONFORMANCE.md](CONFORMANCE.md). We are looking for
+> network teams willing to run it against a **staging** network. Open a discussion.
 
-**In one sentence:** AgenticOS lets an enterprise use AI agents on its real production systems
-(networks, servers, security tools) without the AI being able to cause damage, and with proof
-of everything it did.
+## What it does, on a real incident
 
-### The problem enterprises have today
+A small EVPN/VXLAN data center on Arista switches ([labs/evpn-ceos](labs/evpn-ceos/README.md))
+gets two faults at once: a leaf uplink shut down, and a server port that drifted into another
+tenant's VLAN. The tenant's servers can't reach each other.
 
-Companies want AI agents to do real operations work: fix a network outage at 3am, investigate a
-security alert, change a configuration. The AI is often good enough. But the security officer,
-the compliance team and the network manager all say **no**, for four reasons:
+1. **Evidence.** Agents read every switch (BGP, EVPN, VXLAN, VLANs, MACs) and ping the
+   service. They are read-only and hold no credentials.
+2. **Diagnosis.** A local LLM (Qwen 2.5 7B on Ollama; no data leaves the building) proposes
+   causes. Each proposal must match the live evidence and the **intent in NetBox** ("this port
+   belongs in VLAN 10"), or it is discarded.
+3. **Prediction.** The proposed change is written into the switches' real running configs, and
+   **Batfish** computes the result. For the first fix the prediction was *"VLAN fixed; leaf2's
+   BGP and VTEP paths are still down; the service stays unreachable"*. That was correct: the
+   other fault remained.
+4. **Approval.** A named human approves in **ServiceNow** (as a change request with the
+   implementation plan, backout plan and risk) or in **Slack**. The approval is single-use and
+   bound to that exact change. The AI tried to apply its own fix twice and was refused twice.
+5. **Change.** The change is applied exactly once and verified by an independent agent. The
+   incident runs a second round for the remaining fault.
+6. **Record.** The result: both faults fixed, the service restored (0% loss, confirmed
+   independently on the switches), 2 approved changes, and an intact hash-chained audit log.
 
-1. **"What if it does something stupid?"** Models sometimes invent answers or get manipulated by
-   malicious input (prompt injection). If the agent holds the router passwords, one bad answer
-   can take down the network.
-2. **"Who allowed this?"** Auditors and regulators ask who authorised a production change, why,
-   and based on what evidence. Most agent tools keep chat logs, not proof.
-3. **"Can customer A's AI see customer B's data?"** Service providers and large companies run many
-   customers or business units on shared systems.
-4. **"What happens when it fails halfway?"** If the agent crashes mid-change, did the change happen
-   once, twice, or not at all?
+```
+  NetBox ──intent──┐                       ┌── Batfish: predict from real configs
+                   ▼                       ▼
+  devices ──evidence──▶  AgenticOS kernel  ──change request──▶ ServiceNow / Slack ──▶ human
+                   ▲     (policy, budgets,                                      │
+   local LLM ──proposals  approvals, audit)  ◀──────────── approve / reject ────┘
+                                  │
+                                  └──▶ apply exactly once ──▶ verify ──▶ close the change
+```
 
-So most AI agents stay read-only assistants, and the real value, automated operations, stays
-locked up.
+## Why network teams can say yes
 
-### What AgenticOS does about it
-
-It sits **between the AI agents and the production systems** as a control layer:
-
-| Enterprise concern | What AgenticOS does |
+| The objection | What AgenticOS does |
 |---|---|
-| AI doing something stupid | Agents never hold passwords or direct access. Every action is checked against what that agent is allowed to do, and an unapproved action is simply refused. |
-| Risky changes | A production change must be tested on a simulated copy of the network, pass a confidence check, and be approved by a named human. The device is re-checked right before the change. |
-| Who allowed this? | Every action is recorded with who requested it, who approved it, what evidence was used and what happened, in a tamper-evident log. |
-| Customer separation | One customer's agents can't see or touch another customer's devices, data or messages. |
-| Crashes mid-change | A crashed agent restarts where it stopped; a change is never applied twice. |
-| Different risk tolerance | Each customer sets how cautious the system must be: strict for a bank, relaxed for a lab. |
+| "What if the AI is wrong?" | Its proposals are checked against live evidence and NetBox intent, then simulated in Batfish. A fix that predicts a regression never reaches a human. |
+| "What if it's manipulated?" | Agents run sandboxed with no credentials, no network and no device access. Their only channel is the kernel, and unapproved writes are refused. |
+| "Who approved this?" | A named approver, in your change tool (ServiceNow or Slack), recorded with the evidence and the prediction. Separation of duties is enforced: the requester can't approve. |
+| "What if it fails halfway?" | Agents restart from checkpoints, a change never runs twice, and an unknown outcome escalates to a human. |
+| "Can we prove what happened?" | A hash-chained audit log, and every action can be traced back to the intent and approval behind it. |
+| "Will it fit our stack?" | It reads intent from NetBox, predicts changes with Batfish, raises changes in ServiceNow and talks to people in Slack. Everything runs on-premises with local models. |
+| "How cautious will it be?" | Risk appetite is operator policy, per tenant ([examples/policy.json](examples/policy.json)). Agents can't change it. |
 
-### A concrete example
+## Integrations
 
-At 3am, a BGP session (the link between the company network and an internet provider) goes down.
+| | Status | Where |
+|---|---|---|
+| **NetBox**: source of truth and intent | Live-tested with NetBox 4.3 | [agenticos/sot/netbox.py](agenticos/sot/netbox.py), [labs/evpn-ceos/netbox](labs/evpn-ceos/netbox) |
+| **Batfish**: change prediction from real configs | Live-tested against cEOS configs | [agenticos/drivers/batfish.py](agenticos/drivers/batfish.py) |
+| **ServiceNow**: approvals as change requests | Tested against a Table API fake; not yet run on a real instance | [agenticos/servicenow.py](agenticos/servicenow.py) |
+| **Slack**: approvals by reaction | Live-tested | [agenticos/channels.py](agenticos/channels.py) |
+| **Arista EOS** (cEOS) | Live-tested | [agenticos/drivers/eos.py](agenticos/drivers/eos.py) |
+| **FRR** | Live-tested, and runs in CI | [agenticos/drivers/frr.py](agenticos/drivers/frr.py) |
+| **Local LLMs** (Ollama, OpenAI-compatible) | Live-tested with Qwen 2.5 7B | [agenticos/drivers/models.py](agenticos/drivers/models.py) |
 
-- **Without AI:** an engineer is woken up and spends 40 minutes diagnosing and fixing it.
-- **With an uncontrolled AI agent:** it might fix it in 2 minutes, or change the wrong thing and
-  cause a bigger outage. No bank or telco can approve that.
-- **With AgenticOS:** the agent diagnoses the cause in seconds using read-only access. It
-  proposes a fix and tests it on the simulated network. The on-call engineer gets one message:
-  *"BGP down, cause found, here's the fix; the simulation shows it restores the link without
-  breaking anything else; approve?"* The engineer taps **approve**, the fix is applied exactly
-  once and verified automatically, and the auditor later sees the full record.
+**Who it's for:** network operations teams at telcos, banks, internet exchanges, cloud and
+hosting providers, and large enterprises, wherever a bad change is expensive and auditors ask
+questions. The kernel is open source, so your security team can inspect it. vExpertAI provides
+production agents, device drivers, integration and support.
 
-The engineer goes from 40 minutes of work to a 1-minute approval, with no extra risk.
-
-### The business value
-
-- **Faster incident resolution:** less downtime, fewer engineers woken at night.
-- **AI that is allowed into production:** the security officer can say yes, because the controls
-  can be inspected and tested.
-- **Compliance readiness:** regulations such as the EU AI Act require record-keeping and human
-  oversight for this kind of system, and AgenticOS produces both by design.
-- **No vendor lock-in:** it works with local, on-premises models, which matters for banks, telcos
-  and governments that can't send data to the cloud.
-
-**Who it's for:** telecom operators, banks, internet exchanges, large enterprises and government
-networks: organisations with critical infrastructure and strict regulators. The control layer
-is open source so their security teams can inspect it. vExpertAI provides production agents
-(AI NOC, Cairn), connectors to real Cisco/Juniper/Arista equipment, network simulation,
-deployment and support.
-
-## Why an OS, not another agent framework
+## Why a kernel, not another agent framework
 
 Agent frameworks run the reasoning loop. They don't answer the questions that block
 production use:
@@ -109,7 +105,7 @@ python3 -m agenticos demo --policy examples/policy.json   # per-tenant risk appe
 python3 -m agenticos lifecycle              # start / suspend / resume / cancel
 python3 -m agenticos ps                     # process table of the last run
 python3 -m agenticos audit --lineage del-0001   # verify audit chain + actions under a delegation
-python3 -m pytest -q                        # 81 conformance, red-team and process tests
+python3 -m pytest -q                        # conformance, red-team, driver and integration tests
 ```
 
 ### Real routers + local LLM
@@ -122,11 +118,20 @@ python3 -m agenticos demo --lab --model qwen2.5:7b-instruct     # local model vi
 This runs a real outage on real FRR routers in Docker, diagnosed by a local LLM, and fixed
 through the kernel with approval, exactly-once execution and verification.
 
-**Two faults, real Arista switches:** [labs/evpn-ceos](labs/evpn-ceos/README.md) is a small
-EVPN/VXLAN data center on cEOS with a multi-fault incident: an uplink shut down plus a host
-port that drifted into the wrong VLAN. With scripted rules, AgenticOS fixes 1 of 2 faults and
-escalates. With a local Qwen model, it fixes both in two approved rounds, and the tenant
-service is restored. Run it with `python3 -m agenticos fabric --model qwen2.5:7b-instruct`.
+**Two faults, real Arista switches, the full stack:**
+
+```bash
+labs/evpn-ceos/lab.sh up                         # cEOS spine-leaf fabric (needs the cEOS image)
+labs/evpn-ceos/netbox/netbox.sh up               # NetBox, seeded with the fabric's intent
+docker run -d -p 127.0.0.1:9996:9996 batfish/allinone && pip install pybatfish
+set -a; . var/netbox.env; set +a                # NETBOX_TOKEN, generated by netbox.sh
+python3 -m agenticos fabric --model qwen2.5:7b-instruct --sot netbox --twin batfish \
+    [--servicenow --approvers var/approvers.json]  # SNOW_INSTANCE, SNOW_USER, SNOW_PASSWORD
+```
+
+With scripted rules, AgenticOS fixes 1 of 2 faults and escalates. With a local Qwen model, it
+fixes both in two approved rounds, and the tenant service is restored. See
+[labs/evpn-ceos](labs/evpn-ceos/README.md).
 
 **Always-on mode:** `python3 -m agenticos watch` monitors the routers and opens an incident by
 itself when a BGP link breaks. Agents start and ask a human to approve, either in **Slack**
@@ -306,8 +311,8 @@ These are the enterprise-adoption priorities; see `CONFORMANCE.md` for detail.
 1. **Run on your stack:** PostgreSQL store, container image + Helm, seccomp/cgroup limits.
 2. **Integrate, don't replace:** OPA policy adapter, OpenTelemetry export, Vault/SPIFFE
    identity, SSO approvers.
-3. **Approvals where people work:** Slack ✅ (reaction-based, outbound-only); Teams and
-   ServiceNow next.
+3. **Approvals where people work:** Slack ✅ (reaction-based, outbound-only), ServiceNow
+   change requests ✅ (needs a real-instance validation); Teams next.
 4. **Compliance evidence:** keyed audit chain; mappings to NIST AI RMF, ISO/IEC 42001 and the
    EU AI Act (Art. 12, Art. 14).
 5. **Proof:** an open benchmark against a plain agent-framework baseline, using the built-in
@@ -316,8 +321,14 @@ These are the enterprise-adoption priorities; see `CONFORMANCE.md` for detail.
 
 ## Limits of v0.1 (honest list)
 
-- Real-device support is one FRR driver (vtysh), validated in a 2-router Docker lab.
-  Cisco/Juniper/Arista drivers and a full emulated digital twin are roadmap work.
+- Real-device support: FRR (vtysh) and Arista EOS (cEOS), validated in small Docker labs.
+  The change allowlist is small (interface admin state, access VLAN). Cisco and Juniper
+  drivers are roadmap work.
+- The Batfish twin predicts the control plane: BGP, EVPN sessions, VLANs, VNIs and underlay
+  paths. It does not forward host traffic across VXLAN, so the independent verifier still
+  pings afterwards.
+- The ServiceNow channel has been tested against a fake of the Table API, not a real
+  instance. Real instances drive change state through workflows, which may need configuring.
 - The local-LLM path has been validated with Qwen 2.5 7B on Ollama. Other models are
   untested.
 - Single process: no HA or federation.
